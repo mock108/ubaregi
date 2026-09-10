@@ -10,7 +10,8 @@ ENV PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platfo
 
 USER root
 
-RUN apt-get update \
+RUN rm -f /etc/apt/sources.list.d/yarn.list /etc/apt/sources.list.d/yarn.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates unzip wget \
     && rm -rf /var/lib/apt/lists/*
 
