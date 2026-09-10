@@ -4,7 +4,7 @@ Uber Eatsの配達で扱う現金とおつりを記録する、Android向けの�
 
 ## 現在の状態
 
-設計・開発準備の段階です。Gradleプロジェクトの骨組みは`pgm/ubaregi`にありますが、業務機能とCodespaces・CI/CD・Firebase App Distributionの初期構成はこれから整備します。
+設計・開発準備を終え、`pgm/ubaregi`にCodespacesでビルドできるAndroidプロジェクトの最小骨格を追加しています。現在は4画面の導線と、おつり計算・入力検証を実装済みです。レジ履歴のRoom保存、CI/CD、Firebase App Distribution配布は次の実装段階です。
 
 **Firebase準備 → GitHub Codespaces構築 → アプリ開発 → GitHub ActionsでCI/CD → Firebase App Distributionで個人運用 → 問題がなければGoogle Play公開**の順で進めます。公開日を先に決めず、当面は固定署名した個人用APKをFirebase App Distributionから取得して確認します。Google Playの開発者登録、公開用署名鍵の作成、購入商品の登録は後日行います。
 
