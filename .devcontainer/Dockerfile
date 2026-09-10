@@ -25,8 +25,8 @@ RUN mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools" \
 RUN yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null \
     && sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
         "platform-tools" \
-        "platforms;android-37" \
-        "build-tools;36.0.0" \
+        "platforms;android-37.0" \
+        "build-tools;37.0.0" \
     && chown -R vscode:vscode "${ANDROID_SDK_ROOT}"
 
 USER vscode
