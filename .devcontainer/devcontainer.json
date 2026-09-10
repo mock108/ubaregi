@@ -1,0 +1,20 @@
+{
+  "name": "ubaregi-android",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "ANDROID_HOME": "/opt/android-sdk",
+    "ANDROID_SDK_ROOT": "/opt/android-sdk"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "fwcd.kotlin"
+      ]
+    }
+  },
+  "postCreateCommand": "java -version && sdkmanager --version"
+}
