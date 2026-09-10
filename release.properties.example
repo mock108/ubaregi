@@ -1,0 +1,14 @@
+# Google Play公開準備時にだけ使用する設定見本です。
+# 実値、署名鍵、パスワード、個人情報はこのファイルへ記入しません。
+
+developerName=Mockup
+billingEnabled=false
+billingProductId=developer_support
+supportEmail=
+privacyPolicyUrl=
+
+# 公開用署名設定。鍵はリポジトリ外で管理します。
+storeFile=
+storePassword=
+keyAlias=
+keyPassword=
