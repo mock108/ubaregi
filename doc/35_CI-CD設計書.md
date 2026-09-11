@@ -18,10 +18,9 @@ GitHub Actions CI
   ├─ unit test
   └─ lint
 
-mainへのpush / 手動実行
+CI成功（mainへのpush） / 手動実行
   ↓
 Distribution Workflow
-  ├─ test / lint
   ├─ APK build
   ├─ 固定署名
   └─ Firebase App Distribution upload
@@ -83,21 +82,25 @@ Actionの具体的なバージョンは、作成時点の公式ドキュメン�
 
 トリガーは次のとおりとする。
 
-- `push`（`main`のみ）
+- `workflow_run`（CIの`main`へのpush実行が成功した場合）
 - `workflow_dispatch`
 
-処理は次の順番とする。
+通常の`main`へのpushでは、CI Workflowの成功を受けてDistribution Workflowを起動する。CIとDistributionは別Workflowだが、Distributionが独立して先行したり、CI失敗時に配布したりしない。CIで既に実行したUnit Test / Lintは通常経路では再実行しない。手動実行時はDistribution Workflow内でUnit Test / Lintを先に実行する。
+
+通常の`main`へのpushにおける処理は次の順番とする。
 
 ```text
-checkout
+CI: checkout
 ↓
-JDK 17 / Android SDK API 37を準備
+CI: JDK 17 / Android SDK API 37を準備
 ↓
-Unit Test / Lint
+CI: Unit Test / Lint / Debug APK build
 ↓
-versionCode・versionNameを設定
+CI成功を検知
 ↓
-debug APKをビルド
+Distribution: checkout（CI成功対象のcommit）
+↓
+Distribution: versionCode・versionNameを設定してAPK build
 ↓
 固定の個人配布用keystoreで署名
 ↓
@@ -113,8 +116,10 @@ firebase appdistribution:distribute \
   app/build/outputs/apk/debug/app-debug.apk \
   --app "$FIREBASE_APP_ID" \
   --testers "$FIREBASE_TESTER_EMAIL" \
-  --release-notes "main / Actions run ${GITHUB_RUN_NUMBER} / ${GITHUB_SHA}"
+  --release-notes "main / Actions run ${GITHUB_RUN_NUMBER} / ${RELEASE_SHA}"
 ```
+
+`workflow_run`で起動した場合の`RELEASE_SHA`には、成功したCIが検証したcommitのSHAを設定する。手動実行時は`GITHUB_SHA`を使用する。
 
 APKの実際のファイル名はGradle設定に合わせる。アップロード先は個人用Firebase Android App（`io.github.mock108.ubaregi.debug`）とする。
 
