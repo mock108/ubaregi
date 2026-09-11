@@ -20,7 +20,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            versionNameSuffix = providers.gradleProperty("versionNameSuffix").getOrElse("-debug")
         }
         release {
             isMinifyEnabled = false

@@ -1,0 +1,128 @@
+name: Distribute to Firebase App Distribution
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribute-main
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: pgm/ubaregi
+
+jobs:
+  distribute:
+    name: Build, sign, and distribute APK
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK API 37
+        uses: android-actions/setup-android@v4.0.1
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;37.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4.4.3
+
+      - name: Run unit tests and lint
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug
+
+      - name: Build distribution APK
+        run: >-
+          ./gradlew --no-daemon
+          -PversionCode="$GITHUB_RUN_NUMBER"
+          -PversionName="0.1.0-dev.${GITHUB_RUN_NUMBER}"
+          -PversionNameSuffix=""
+          assembleDebug
+
+      - name: Sign distribution APK with fixed keystore
+        env:
+          UBAREGI_KEYSTORE_BASE64: ${{ secrets.UBAREGI_KEYSTORE_BASE64 }}
+          UBAREGI_STORE_PASSWORD: ${{ secrets.UBAREGI_STORE_PASSWORD }}
+          UBAREGI_KEY_ALIAS: ${{ secrets.UBAREGI_KEY_ALIAS }}
+          UBAREGI_KEY_PASSWORD: ${{ secrets.UBAREGI_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keystore_path="${RUNNER_TEMP}/ubaregi-distribution.keystore"
+          apk_path="app/build/outputs/apk/debug/app-debug.apk"
+          signed_apk_path="${RUNNER_TEMP}/ubaregi-distribution-signed.apk"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:?ANDROID_SDK_ROOT/ANDROID_HOME is required}}"
+          apksigner_path="${sdk_root}/build-tools/37.0.0/apksigner"
+
+          test -n "$UBAREGI_KEYSTORE_BASE64"
+          test -n "$UBAREGI_STORE_PASSWORD"
+          test -n "$UBAREGI_KEY_ALIAS"
+          test -n "$UBAREGI_KEY_PASSWORD"
+
+          umask 077
+          printf '%s' "$UBAREGI_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          test -s "$keystore_path"
+          test -x "$apksigner_path"
+
+          "$apksigner_path" sign \
+            --ks "$keystore_path" \
+            --ks-key-alias "$UBAREGI_KEY_ALIAS" \
+            --ks-pass env:UBAREGI_STORE_PASSWORD \
+            --key-pass env:UBAREGI_KEY_PASSWORD \
+            --out "$signed_apk_path" \
+            "$apk_path"
+
+          mv "$signed_apk_path" "$apk_path"
+          "$apksigner_path" verify "$apk_path"
+
+      - name: Upload APK to Firebase App Distribution
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_TESTER_EMAIL: ${{ secrets.FIREBASE_TESTER_EMAIL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          credentials_path="${RUNNER_TEMP}/firebase-service-account.json"
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON"
+          test -n "$FIREBASE_PROJECT_ID"
+          test -n "$FIREBASE_APP_ID"
+          test -n "$FIREBASE_TESTER_EMAIL"
+
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$credentials_path"
+          test -s "$credentials_path"
+
+          GOOGLE_APPLICATION_CREDENTIALS="$credentials_path" \
+            npx --yes firebase-tools@15.30.0 appdistribution:distribute \
+            app/build/outputs/apk/debug/app-debug.apk \
+            --project "$FIREBASE_PROJECT_ID" \
+            --app "$FIREBASE_APP_ID" \
+            --testers "$FIREBASE_TESTER_EMAIL" \
+            --release-notes "main / Actions run ${GITHUB_RUN_NUMBER} / ${GITHUB_SHA}"
+
+      - name: Remove temporary credentials and signed APK
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/ubaregi-distribution.keystore" \
+            "${RUNNER_TEMP}/ubaregi-distribution-signed.apk" \
+            "${RUNNER_TEMP}/firebase-service-account.json" \
+            "app/build/outputs/apk/debug/app-debug.apk"
