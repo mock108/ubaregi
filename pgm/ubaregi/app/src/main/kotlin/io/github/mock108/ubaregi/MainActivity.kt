@@ -150,7 +150,7 @@ private fun HomeActionButton(
 private fun RegisterScreen(paddingValues: PaddingValues) {
     AppContent(paddingValues) {
         Text("レジ締め / 初期釣銭", style = MaterialTheme.typography.headlineSmall)
-        Text("この画面は次工程でRoom保存と接続します。")
+        Text("画面からの業務操作接続は次工程で実装します。")
         Spacer(Modifier.height(16.dp))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -218,7 +218,7 @@ private fun CalculatorScreen(paddingValues: PaddingValues) {
             }
         }
         Text(
-            "受渡し履歴への保存は、Room導入後に有効化します。",
+            "受渡し履歴への保存は、画面接続後に有効化します。",
             style = MaterialTheme.typography.bodySmall,
         )
     }
