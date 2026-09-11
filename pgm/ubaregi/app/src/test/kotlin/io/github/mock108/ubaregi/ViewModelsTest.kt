@@ -88,7 +88,63 @@ class ViewModelsTest {
         viewModel.savePayment()
         advanceUntilIdle()
         assertEquals("", viewModel.uiState.value.productText)
+        assertNull(viewModel.uiState.value.pendingEntryId)
         assertEquals(1, repository.listEntries(session.id).size)
+    }
+
+    @Test
+    fun calculatorStartsOnCalculationTabAndKeepsInputWhenTabChanges() = runTest(dispatcher) {
+        val repository = FakeRegisterRepository()
+        val viewModel = CalculatorViewModel(repository, SavedStateHandle())
+        advanceUntilIdle()
+
+        assertEquals(CalculatorTab.CALCULATE, viewModel.uiState.value.selectedTab)
+        viewModel.onProductChanged("120")
+        viewModel.onReceivedChanged("200")
+        viewModel.selectTab(CalculatorTab.RECORDS)
+        assertEquals("120", viewModel.uiState.value.productText)
+        assertEquals("200", viewModel.uiState.value.receivedText)
+        viewModel.selectTab(CalculatorTab.CALCULATE)
+        assertEquals(CalculatorTab.CALCULATE, viewModel.uiState.value.selectedTab)
+    }
+
+    @Test
+    fun calculatorKeypadMovesFocusDeletesAndClearsOnlyFocusedInput() = runTest(dispatcher) {
+        val repository = FakeRegisterRepository()
+        val viewModel = CalculatorViewModel(repository, SavedStateHandle())
+        advanceUntilIdle()
+
+        viewModel.appendDigit(1)
+        viewModel.appendDigit(2)
+        assertEquals("12", viewModel.uiState.value.productText)
+        viewModel.nextInput()
+        assertEquals(CalculatorInputField.RECEIVED, viewModel.uiState.value.focusedField)
+        viewModel.appendDigit(5)
+        viewModel.appendDigit(0)
+        viewModel.deleteLastDigit()
+        assertEquals("5", viewModel.uiState.value.receivedText)
+        viewModel.clearFocusedInput()
+        assertEquals("", viewModel.uiState.value.receivedText)
+        assertEquals("12", viewModel.uiState.value.productText)
+        viewModel.moveFocus()
+        assertEquals(CalculatorInputField.PRODUCT, viewModel.uiState.value.focusedField)
+    }
+
+    @Test
+    fun calculatorShowsOnlyPaymentHistoryAndRejectsVoidedEdit() = runTest(dispatcher) {
+        val repository = FakeRegisterRepository()
+        val session = repository.startRegister(1_000)
+        repository.addPayment(session.id, 100, 500)
+        val viewModel = CalculatorViewModel(repository, SavedStateHandle())
+        advanceUntilIdle()
+        viewModel.selectRegister(session.id)
+        advanceUntilIdle()
+        viewModel.selectTab(CalculatorTab.RECORDS)
+        assertEquals(1, viewModel.uiState.value.paymentEntries.size)
+
+        val voided = viewModel.uiState.value.paymentEntries.single().copy(isVoided = true)
+        viewModel.showPaymentEditDialog(voided)
+        assertNull(viewModel.uiState.value.editEntryId)
     }
 
     @Test

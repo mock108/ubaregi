@@ -1,9 +1,11 @@
 package io.github.mock108.ubaregi
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -11,20 +13,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -33,6 +48,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,12 +91,12 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppDestination(
     val label: String,
-    val shortLabel: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
 ) {
-    HOME("ホーム", "家"),
-    REGISTER("レジ", "レ"),
-    CALCULATOR("計算", "計"),
-    ABOUT("情報", "情"),
+    HOME("ホーム", Icons.Filled.Home),
+    REGISTER("レジ", Icons.Filled.PointOfSale),
+    CALCULATOR("計算", Icons.Filled.Calculate),
+    ABOUT("情報", Icons.Filled.Info),
 }
 
 @Composable
@@ -102,7 +119,7 @@ fun UbaregiApp(repository: RegisterRepository) {
                     NavigationBarItem(
                         selected = destination == item,
                         onClick = { destinationName = item.name },
-                        icon = { Text(item.shortLabel) },
+                        icon = { Icon(item.icon, contentDescription = "${item.label}画面") },
                         label = { Text(item.label) },
                     )
                 }
@@ -114,6 +131,7 @@ fun UbaregiApp(repository: RegisterRepository) {
                 paddingValues = innerPadding,
                 viewModel = homeViewModel,
                 onNavigate = { destinationName = it.name },
+                onExit = { (context as? Activity)?.finish() },
             )
 
             AppDestination.REGISTER -> RegisterScreen(
@@ -123,17 +141,21 @@ fun UbaregiApp(repository: RegisterRepository) {
                     calculatorTargetId = sessionId
                     destinationName = AppDestination.CALCULATOR.name
                 },
+                onNavigateHome = { destinationName = AppDestination.HOME.name },
             )
 
             AppDestination.CALCULATOR -> CalculatorScreen(
                 paddingValues = innerPadding,
                 viewModel = calculatorViewModel,
                 initialTargetId = calculatorTargetId,
+                onTargetConsumed = { calculatorTargetId = null },
                 onNavigateToRegister = { destinationName = AppDestination.REGISTER.name },
+                onNavigateHome = { destinationName = AppDestination.HOME.name },
             )
 
             AppDestination.ABOUT -> AboutScreen(
                 paddingValues = innerPadding,
+                onNavigateHome = { destinationName = AppDestination.HOME.name },
                 onContact = {
                     val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(CONTACT_URL))
                     try {
@@ -154,8 +176,10 @@ private fun HomeScreen(
     paddingValues: PaddingValues,
     viewModel: HomeViewModel,
     onNavigate: (AppDestination) -> Unit,
+    onExit: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    BackHandler { onExit() }
     AppContent(paddingValues) {
         Text("ウバレジ", style = MaterialTheme.typography.headlineMedium)
         Text("現金とおつりを端末内で記録する補助アプリ")
@@ -192,10 +216,24 @@ private fun RegisterScreen(
     paddingValues: PaddingValues,
     viewModel: RegisterViewModel,
     onNavigateToCalculator: (String) -> Unit,
+    onNavigateHome: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selected = state.selectedRegister
     val summary = state.selectedSummary
+
+    BackHandler {
+        when {
+            state.clearHistoryDialog != null -> viewModel.dismissClearHistoryDialog()
+            state.voidEntryId != null -> viewModel.dismissVoidEntry()
+            state.entryEditDialog != null -> viewModel.dismissEntryEditDialog()
+            state.registerEditDialog != null -> viewModel.dismissRegisterEditDialog()
+            state.isCloseConfirmationVisible -> viewModel.dismissCloseConfirmation()
+            state.closeDialog != null -> viewModel.dismissCloseDialog()
+            state.adjustmentDialog != null -> viewModel.dismissAdjustmentDialog()
+            else -> onNavigateHome()
+        }
+    }
 
     AppContent(paddingValues) {
         Text("レジ締め / 初期釣銭", style = MaterialTheme.typography.headlineSmall)
@@ -428,23 +466,64 @@ private fun CalculatorScreen(
     paddingValues: PaddingValues,
     viewModel: CalculatorViewModel,
     initialTargetId: String?,
+    onTargetConsumed: () -> Unit,
     onNavigateToRegister: () -> Unit,
+    onNavigateHome: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var registerMenuExpanded by remember { mutableStateOf(false) }
+    var helpVisible by rememberSaveable { mutableStateOf(false) }
+    var discardEditConfirmationVisible by rememberSaveable { mutableStateOf(false) }
     val selected = state.selectedRegister
     val result = remember(state.productText, state.receivedText) { ChangeCalculator.calculate(state.productText, state.receivedText) }
-    LaunchedEffect(initialTargetId, state.registers) { viewModel.setInitialTarget(initialTargetId) }
+    val editEntry = state.editEntryId?.let { id -> state.paymentEntries.firstOrNull { it.id == id } }
+    val editResult = remember(state.editProductText, state.editReceivedText) {
+        ChangeCalculator.calculate(state.editProductText, state.editReceivedText)
+    }
+    val editHasChanges = editEntry != null &&
+        (state.editProductText != editEntry.productAmountYen?.toString() ||
+            state.editReceivedText != editEntry.receivedAmountYen?.toString())
+
+    fun requestDismissEdit() {
+        if (editHasChanges) {
+            discardEditConfirmationVisible = true
+        } else {
+            viewModel.dismissPaymentEditDialog()
+        }
+    }
+
+    BackHandler {
+        when {
+            discardEditConfirmationVisible -> discardEditConfirmationVisible = false
+            helpVisible -> helpVisible = false
+            state.voidEntryId != null -> viewModel.dismissVoidPayment()
+            state.editEntryId != null -> requestDismissEdit()
+            else -> onNavigateHome()
+        }
+    }
+
+    LaunchedEffect(Unit) { viewModel.selectTab(CalculatorTab.CALCULATE) }
+
+    LaunchedEffect(initialTargetId) {
+        initialTargetId?.let {
+            viewModel.setInitialTarget(it)
+            onTargetConsumed()
+        }
+    }
 
     AppContent(paddingValues) {
-        Text("おつり計算", style = MaterialTheme.typography.headlineSmall)
-        Text("計算だけならレジ未開始でも利用できます。")
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("おつり計算", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            IconButton(onClick = { helpVisible = true }) {
+                Icon(Icons.Filled.Info, contentDescription = "おつり計算の説明")
+            }
+        }
         ErrorText(state.errorMessage)
         SuccessText(state.message)
         Spacer(Modifier.height(12.dp))
 
-        Text("対象レジ")
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("対象レジ", style = MaterialTheme.typography.labelLarge)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = { registerMenuExpanded = true }, enabled = state.registers.isNotEmpty()) {
                 Text(selected?.let { "#${it.sequence} ${it.status.name}" } ?: "レジ未開始")
             }
@@ -456,62 +535,137 @@ private fun CalculatorScreen(
                     )
                 }
             }
-            if (selected?.status == RegisterStatus.CLOSED) Text("締め済みレジのため新規保存不可", color = MaterialTheme.colorScheme.error)
         }
-        if (selected == null || selected.status == RegisterStatus.OPEN) {
-            MoneyField("商品金額", state.productText, viewModel::onProductChanged)
-            Spacer(Modifier.height(12.dp))
-            MoneyField("お客様支払金額", state.receivedText, viewModel::onReceivedChanged)
-        } else {
-            MoneyField("商品金額", state.productText, viewModel::onProductChanged, enabled = false)
-            MoneyField("お客様支払金額", state.receivedText, viewModel::onReceivedChanged, enabled = false)
-            Text("新規入力・保存は無効です。既存履歴の編集・取消だけ行えます。")
+        if (selected?.status == RegisterStatus.CLOSED) {
+            Text("締め済み: 記録不可", color = MaterialTheme.colorScheme.error)
+        }
+        TabRow(selectedTabIndex = state.selectedTab.ordinal) {
+            Tab(
+                selected = state.selectedTab == CalculatorTab.CALCULATE,
+                onClick = { viewModel.selectTab(CalculatorTab.CALCULATE) },
+                text = { Text("計算") },
+            )
+            Tab(
+                selected = state.selectedTab == CalculatorTab.RECORDS,
+                onClick = { viewModel.selectTab(CalculatorTab.RECORDS) },
+                text = { Text("記録") },
+            )
         }
         Spacer(Modifier.height(16.dp))
 
-        when (result) {
-            ChangeResult.Empty -> Text("2つの金額を入力してください")
-            is ChangeResult.Invalid -> ErrorText(result.message)
-            is ChangeResult.Shortage -> ErrorText("あと${formatYen(result.amount)}不足")
-            is ChangeResult.Success -> Text("おつり ${formatYen(result.change)}", style = MaterialTheme.typography.headlineSmall)
-        }
+        when (state.selectedTab) {
+            CalculatorTab.CALCULATE -> {
+                CalculatorMoneyField(
+                    label = "商品金額",
+                    value = state.productText,
+                    focused = state.focusedField == CalculatorInputField.PRODUCT,
+                    onFocus = { viewModel.focusField(CalculatorInputField.PRODUCT) },
+                )
+                Spacer(Modifier.height(10.dp))
+                CalculatorMoneyField(
+                    label = "お客様支払金額",
+                    value = state.receivedText,
+                    focused = state.focusedField == CalculatorInputField.RECEIVED,
+                    onFocus = { viewModel.focusField(CalculatorInputField.RECEIVED) },
+                )
+                Spacer(Modifier.height(14.dp))
 
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = viewModel::savePayment,
-                enabled = (selected?.status == RegisterStatus.OPEN || state.pendingEntryId != null) && result is ChangeResult.Success && !state.isSaving,
-            ) { Text(if (state.isSaving) "保存中…" else if (selected?.status == RegisterStatus.CLOSED) "保存を再試行" else "受渡しを記録") }
-            TextButton(onClick = viewModel::clearInput, enabled = selected?.status != RegisterStatus.CLOSED) { Text("入力をクリア") }
-        }
-        if (selected == null) {
-            TextButton(onClick = onNavigateToRegister) { Text("レジを開始する") }
-        }
+                when (result) {
+                    ChangeResult.Empty -> Text("2つの金額を入力してください")
+                    is ChangeResult.Invalid -> ErrorText(result.message)
+                    is ChangeResult.Shortage -> ErrorText("あと${formatYen(result.amount)}不足")
+                    is ChangeResult.Success -> Text("おつり ${formatYen(result.change)}", style = MaterialTheme.typography.headlineSmall)
+                }
 
-        Spacer(Modifier.height(20.dp))
-        Text("受渡し履歴", style = MaterialTheme.typography.titleMedium)
-        if (state.paymentEntries.isEmpty()) Text("このレジのPAYMENT明細はありません。")
-        state.paymentEntries.forEach { entry ->
-            PaymentEntryCard(
-                entry = entry,
-                onEdit = { viewModel.showPaymentEditDialog(entry) },
-                onVoid = { viewModel.requestVoidPayment(entry) },
-            )
+                Spacer(Modifier.height(12.dp))
+                CalculatorKeypad(
+                    enabled = !state.isSaving,
+                    onDigit = viewModel::appendDigit,
+                    onDelete = viewModel::deleteLastDigit,
+                    onClear = viewModel::clearFocusedInput,
+                    onMoveFocus = viewModel::moveFocus,
+                    onNext = viewModel::nextInput,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = viewModel::savePayment,
+                        modifier = Modifier.weight(1f),
+                        enabled = (selected?.status == RegisterStatus.OPEN || state.pendingEntryId != null) &&
+                            result is ChangeResult.Success && !state.isSaving,
+                    ) {
+                        Text(
+                            when {
+                                state.isSaving -> "保存中…"
+                                selected?.status == RegisterStatus.CLOSED -> "保存を再試行"
+                                else -> "受渡しを記録"
+                            },
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::clearInput,
+                        modifier = Modifier.weight(1f),
+                        enabled = !state.isSaving,
+                    ) { Text("入力をクリア") }
+                }
+                if (selected == null) {
+                    TextButton(onClick = onNavigateToRegister) { Text("レジを開始する") }
+                }
+            }
+
+            CalculatorTab.RECORDS -> {
+                Text("受渡し履歴", style = MaterialTheme.typography.titleMedium)
+                if (state.paymentEntries.isEmpty()) Text("このレジのPAYMENT明細はありません。")
+                state.paymentEntries.forEach { entry ->
+                    PaymentEntryCard(
+                        entry = entry,
+                        onEdit = { viewModel.showPaymentEditDialog(entry) },
+                        onVoid = { viewModel.requestVoidPayment(entry) },
+                    )
+                }
+            }
         }
     }
 
     state.editEntryId?.let {
         AlertDialog(
-            onDismissRequest = viewModel::dismissPaymentEditDialog,
+            onDismissRequest = ::requestDismissEdit,
             title = { Text("受渡し明細を編集") },
             text = {
-                Column {
-                    MoneyField("商品金額", state.editProductText, viewModel::onEditProductChanged)
-                    MoneyField("受取金額", state.editReceivedText, viewModel::onEditReceivedChanged)
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    CalculatorMoneyField(
+                        label = "商品金額",
+                        value = state.editProductText,
+                        focused = state.editFocusedField == CalculatorInputField.PRODUCT,
+                        onFocus = { viewModel.focusEditField(CalculatorInputField.PRODUCT) },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    CalculatorMoneyField(
+                        label = "お客様支払金額",
+                        value = state.editReceivedText,
+                        focused = state.editFocusedField == CalculatorInputField.RECEIVED,
+                        onFocus = { viewModel.focusEditField(CalculatorInputField.RECEIVED) },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    when (editResult) {
+                        ChangeResult.Empty -> Text("2つの金額を入力してください")
+                        is ChangeResult.Invalid -> ErrorText(editResult.message)
+                        is ChangeResult.Shortage -> ErrorText("あと${formatYen(editResult.amount)}不足")
+                        is ChangeResult.Success -> Text("おつり ${formatYen(editResult.change)}")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    CalculatorKeypad(
+                        enabled = !state.isSaving,
+                        onDigit = viewModel::appendEditDigit,
+                        onDelete = viewModel::deleteEditLastDigit,
+                        onClear = viewModel::clearEditFocusedInput,
+                        onMoveFocus = viewModel::moveEditFocus,
+                        onNext = viewModel::nextEditInput,
+                    )
                 }
             },
             confirmButton = { Button(onClick = viewModel::savePaymentEdit, enabled = !state.isSaving) { Text("保存") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissPaymentEditDialog) { Text("キャンセル") } },
+            dismissButton = { TextButton(onClick = ::requestDismissEdit) { Text("キャンセル") } },
         )
     }
     state.voidEntryId?.let {
@@ -523,13 +677,45 @@ private fun CalculatorScreen(
             dismissButton = { TextButton(onClick = viewModel::dismissVoidPayment) { Text("キャンセル") } },
         )
     }
+
+    if (discardEditConfirmationVisible) {
+        AlertDialog(
+            onDismissRequest = { discardEditConfirmationVisible = false },
+            title = { Text("編集を破棄しますか？") },
+            text = { Text("変更した金額は保存されません。") },
+            confirmButton = {
+                Button(onClick = {
+                    discardEditConfirmationVisible = false
+                    viewModel.dismissPaymentEditDialog()
+                }) { Text("破棄する") }
+            },
+            dismissButton = { TextButton(onClick = { discardEditConfirmationVisible = false }) { Text("編集を続ける") } },
+        )
+    }
+
+    if (helpVisible) {
+        AlertDialog(
+            onDismissRequest = { helpVisible = false },
+            title = { Text("おつり計算の使い方") },
+            text = {
+                Text(
+                    "商品金額と受取金額を入力すると、おつりまたは不足額を表示します。\n\n" +
+                        "不足している場合は保存できません。実際に現金を受け渡した後に「受渡しを記録」を押してください。\n\n" +
+                        "レジ未開始でも計算だけ利用できます。記録は端末内に保存され、ログインやクラウド同期はありません。",
+                )
+            },
+            confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("閉じる") } },
+        )
+    }
 }
 
 @Composable
 private fun AboutScreen(
     paddingValues: PaddingValues,
+    onNavigateHome: () -> Unit,
     onContact: () -> Unit,
 ) {
+    BackHandler { onNavigateHome() }
     AppContent(paddingValues) {
         Text("アプリ情報", style = MaterialTheme.typography.headlineSmall)
         Text("アプリ名: ${stringResource(R.string.app_name)}")
@@ -544,6 +730,87 @@ private fun AboutScreen(
         Text("問い合わせ操作をしたときだけ、固定URLを外部ブラウザーで開きます。顧客情報・金額・端末情報はURLに付加しません。")
         Spacer(Modifier.height(8.dp))
         Button(onClick = onContact) { Text("GitHubで問い合わせ") }
+    }
+}
+
+@Composable
+private fun CalculatorMoneyField(
+    label: String,
+    value: String,
+    focused: Boolean,
+    onFocus: () -> Unit,
+    enabled: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onFocus),
+        label = { Text(label) },
+        singleLine = true,
+        readOnly = true,
+        enabled = enabled,
+        isError = false,
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+        ),
+    )
+}
+
+@Composable
+private fun CalculatorKeypad(
+    enabled: Boolean,
+    onDigit: (Int) -> Unit,
+    onDelete: () -> Unit,
+    onClear: () -> Unit,
+    onMoveFocus: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val numberRows = listOf(listOf(1, 2, 3), listOf(4, 5, 6), listOf(7, 8, 9))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        numberRows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { digit ->
+                    Button(
+                        onClick = { onDigit(digit) },
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                    ) { Text(digit.toString(), style = MaterialTheme.typography.titleLarge) }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { onDigit(0) },
+                enabled = enabled,
+                modifier = Modifier.weight(1f).height(52.dp),
+            ) { Text("0", style = MaterialTheme.typography.titleLarge) }
+            KeypadIconButton(Icons.Filled.Backspace, "1文字削除", onDelete, enabled)
+            KeypadIconButton(Icons.Filled.DeleteSweep, "入力欄を全消去", onClear, enabled)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            KeypadIconButton(Icons.Filled.SwapVert, "商品金額と受取金額を切り替え", onMoveFocus, enabled)
+            KeypadIconButton(Icons.Filled.ArrowForward, "次の入力へ移動", onNext, enabled)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.KeypadIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.weight(1f).height(52.dp),
+    ) {
+        Icon(icon, contentDescription = contentDescription)
     }
 }
 

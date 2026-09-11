@@ -512,11 +512,14 @@ data class CalculatorUiState(
     val isLoading: Boolean = true,
     val registers: List<RegisterSession> = emptyList(),
     val selectedRegisterId: String? = null,
+    val selectedTab: CalculatorTab = CalculatorTab.CALCULATE,
+    val focusedField: CalculatorInputField = CalculatorInputField.PRODUCT,
     val productText: String = "",
     val receivedText: String = "",
     val pendingEntryId: String? = null,
     val entries: List<CashEntry> = emptyList(),
     val editEntryId: String? = null,
+    val editFocusedField: CalculatorInputField = CalculatorInputField.PRODUCT,
     val editProductText: String = "",
     val editReceivedText: String = "",
     val voidEntryId: String? = null,
@@ -531,6 +534,16 @@ data class CalculatorUiState(
         get() = entries.filter { it.kind == CashEntryKind.PAYMENT }
 }
 
+enum class CalculatorTab {
+    CALCULATE,
+    RECORDS,
+}
+
+enum class CalculatorInputField {
+    PRODUCT,
+    RECEIVED,
+}
+
 class CalculatorViewModel(
     private val repository: RegisterRepository,
     private val savedStateHandle: SavedStateHandle,
@@ -538,6 +551,7 @@ class CalculatorViewModel(
     private val _uiState = MutableStateFlow(
         CalculatorUiState(
             selectedRegisterId = savedStateHandle[SELECTED_REGISTER_KEY],
+            selectedTab = CalculatorTab.CALCULATE,
             productText = savedStateHandle[PRODUCT_KEY] ?: "",
             receivedText = savedStateHandle[RECEIVED_KEY] ?: "",
             pendingEntryId = savedStateHandle[PENDING_ENTRY_ID_KEY],
@@ -553,7 +567,7 @@ class CalculatorViewModel(
                 val selectedId = when {
                     selected != null && sessions.any { it.id == selected } -> selected
                     sessions.any { it.status == RegisterStatus.OPEN } -> sessions.first { it.status == RegisterStatus.OPEN }.id
-                    else -> selected
+                    else -> sessions.firstOrNull()?.id
                 }
                 savedStateHandle[SELECTED_REGISTER_KEY] = selectedId
                 if (sessions.isEmpty()) {
@@ -585,6 +599,63 @@ class CalculatorViewModel(
     fun selectRegister(sessionId: String?) {
         savedStateHandle[SELECTED_REGISTER_KEY] = sessionId
         _uiState.update { it.copy(selectedRegisterId = sessionId, errorMessage = null, message = null) }
+    }
+
+    fun selectTab(tab: CalculatorTab) {
+        _uiState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun focusField(field: CalculatorInputField) {
+        _uiState.update { it.copy(focusedField = field) }
+    }
+
+    fun moveFocus() {
+        _uiState.update {
+            it.copy(
+                focusedField = when (it.focusedField) {
+                    CalculatorInputField.PRODUCT -> CalculatorInputField.RECEIVED
+                    CalculatorInputField.RECEIVED -> CalculatorInputField.PRODUCT
+                },
+            )
+        }
+    }
+
+    fun nextInput() = moveFocus()
+
+    fun appendDigit(digit: Int) {
+        if (digit !in 0..9) return
+        val state = _uiState.value
+        val current = when (state.focusedField) {
+            CalculatorInputField.PRODUCT -> state.productText
+            CalculatorInputField.RECEIVED -> state.receivedText
+        }
+        val normalized = normalizeDigits(current)
+        if (normalized.length >= MAX_MONEY_DIGITS) return
+        val updated = normalized + digit
+        when (state.focusedField) {
+            CalculatorInputField.PRODUCT -> onProductChanged(updated)
+            CalculatorInputField.RECEIVED -> onReceivedChanged(updated)
+        }
+    }
+
+    fun deleteLastDigit() {
+        val state = _uiState.value
+        val current = when (state.focusedField) {
+            CalculatorInputField.PRODUCT -> state.productText
+            CalculatorInputField.RECEIVED -> state.receivedText
+        }
+        val updated = current.dropLast(1)
+        when (state.focusedField) {
+            CalculatorInputField.PRODUCT -> onProductChanged(updated)
+            CalculatorInputField.RECEIVED -> onReceivedChanged(updated)
+        }
+    }
+
+    fun clearFocusedInput() {
+        when (_uiState.value.focusedField) {
+            CalculatorInputField.PRODUCT -> onProductChanged("")
+            CalculatorInputField.RECEIVED -> onReceivedChanged("")
+        }
     }
 
     fun setInitialTarget(sessionId: String?) {
@@ -654,6 +725,7 @@ class CalculatorViewModel(
         _uiState.update {
             it.copy(
                 editEntryId = entry.id,
+                editFocusedField = CalculatorInputField.PRODUCT,
                 editProductText = entry.productAmountYen?.toString() ?: "",
                 editReceivedText = entry.receivedAmountYen?.toString() ?: "",
                 errorMessage = null,
@@ -664,6 +736,59 @@ class CalculatorViewModel(
     fun onEditProductChanged(value: String) = _uiState.update { it.copy(editProductText = value, errorMessage = null) }
 
     fun onEditReceivedChanged(value: String) = _uiState.update { it.copy(editReceivedText = value, errorMessage = null) }
+
+    fun focusEditField(field: CalculatorInputField) {
+        _uiState.update { it.copy(editFocusedField = field) }
+    }
+
+    fun moveEditFocus() {
+        _uiState.update {
+            it.copy(
+                editFocusedField = when (it.editFocusedField) {
+                    CalculatorInputField.PRODUCT -> CalculatorInputField.RECEIVED
+                    CalculatorInputField.RECEIVED -> CalculatorInputField.PRODUCT
+                },
+            )
+        }
+    }
+
+    fun nextEditInput() = moveEditFocus()
+
+    fun appendEditDigit(digit: Int) {
+        if (digit !in 0..9) return
+        val state = _uiState.value
+        val current = when (state.editFocusedField) {
+            CalculatorInputField.PRODUCT -> state.editProductText
+            CalculatorInputField.RECEIVED -> state.editReceivedText
+        }
+        val normalized = normalizeDigits(current)
+        if (normalized.length >= MAX_MONEY_DIGITS) return
+        val updated = normalized + digit
+        when (state.editFocusedField) {
+            CalculatorInputField.PRODUCT -> onEditProductChanged(updated)
+            CalculatorInputField.RECEIVED -> onEditReceivedChanged(updated)
+        }
+    }
+
+    fun deleteEditLastDigit() {
+        val state = _uiState.value
+        val current = when (state.editFocusedField) {
+            CalculatorInputField.PRODUCT -> state.editProductText
+            CalculatorInputField.RECEIVED -> state.editReceivedText
+        }
+        val updated = current.dropLast(1)
+        when (state.editFocusedField) {
+            CalculatorInputField.PRODUCT -> onEditProductChanged(updated)
+            CalculatorInputField.RECEIVED -> onEditReceivedChanged(updated)
+        }
+    }
+
+    fun clearEditFocusedInput() {
+        when (_uiState.value.editFocusedField) {
+            CalculatorInputField.PRODUCT -> onEditProductChanged("")
+            CalculatorInputField.RECEIVED -> onEditReceivedChanged("")
+        }
+    }
 
     fun dismissPaymentEditDialog() = _uiState.update { it.copy(editEntryId = null) }
 
@@ -718,6 +843,7 @@ class CalculatorViewModel(
     private fun showError(message: String) = _uiState.update { it.copy(errorMessage = message, message = null) }
 
     companion object {
+        private const val MAX_MONEY_DIGITS = 7
         private const val SELECTED_REGISTER_KEY = "calculator.selectedRegisterId"
         private const val PRODUCT_KEY = "calculator.product"
         private const val RECEIVED_KEY = "calculator.received"
