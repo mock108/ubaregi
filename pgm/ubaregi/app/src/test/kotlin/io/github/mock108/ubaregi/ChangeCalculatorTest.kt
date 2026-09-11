@@ -31,7 +31,7 @@ class ChangeCalculatorTest {
     @Test
     fun rejectsZeroProductAmount() {
         assertEquals(
-            ChangeResult.Invalid("商品金額は1〜9,999,999円で入力してください"),
+            ChangeResult.Invalid("商品金額は1円以上で入力してください"),
             ChangeCalculator.calculate(productText = "0", receivedText = "500"),
         )
     }
