@@ -7,7 +7,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
@@ -64,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -83,7 +87,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             UbaregiTheme {
                 val repository = (application as UbaregiApplication).registerRepository
-                UbaregiApp(repository)
+                val exportService = (application as UbaregiApplication).exportService
+                UbaregiApp(repository, exportService)
             }
         }
     }
@@ -101,11 +106,11 @@ private enum class AppDestination(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun UbaregiApp(repository: RegisterRepository) {
+fun UbaregiApp(repository: RegisterRepository, exportService: AndroidExportService) {
     var destinationName by rememberSaveable { mutableStateOf(AppDestination.HOME.name) }
     var calculatorTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     val destination = AppDestination.valueOf(destinationName)
-    val factory = remember(repository) { UbaregiViewModelFactory(repository) }
+    val factory = remember(repository, exportService) { UbaregiViewModelFactory(repository, exportService) }
     val homeViewModel: HomeViewModel = viewModel(factory = factory)
     val registerViewModel: RegisterViewModel = viewModel(factory = factory)
     val calculatorViewModel: CalculatorViewModel = viewModel(factory = factory)
@@ -179,6 +184,20 @@ private fun HomeScreen(
     onExit: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val jsonLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        viewModel.completeExport(uri)
+    }
+    val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        viewModel.completeExport(uri)
+    }
+    LaunchedEffect(state.exportRequest) {
+        state.exportRequest?.let { request ->
+            when (request.format) {
+                ExportFormat.JSON -> jsonLauncher.launch(request.fileName)
+                ExportFormat.CSV -> csvLauncher.launch(request.fileName)
+            }
+        }
+    }
     BackHandler { onExit() }
     AppContent(paddingValues) {
         Text("ウバレジ", style = MaterialTheme.typography.headlineMedium)
@@ -204,10 +223,31 @@ private fun HomeScreen(
         }
 
         ErrorText(state.errorMessage)
+        SuccessText(state.message)
         Spacer(Modifier.height(16.dp))
         HomeActionButton("おつりを計算", "商品金額と受取金額から計算") { onNavigate(AppDestination.CALCULATOR) }
         HomeActionButton("レジを始める・終える", "開始時の釣銭、現金の補充・取出し、終了時の確認") { onNavigate(AppDestination.REGISTER) }
         HomeActionButton("アプリ情報", "データの扱いと問い合わせ先") { onNavigate(AppDestination.ABOUT) }
+        Spacer(Modifier.height(12.dp))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("データを書き出す", style = MaterialTheme.typography.titleMedium)
+                Text("端末内のレジ履歴をJSONまたはCSVで保存します。保存先を選択すると書き出しを開始します。")
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { viewModel.requestExport(ExportFormat.JSON) },
+                        enabled = !state.isUnavailable && !state.isExporting && state.exportRequest == null,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (state.isExporting) "保存中…" else "JSON") }
+                    OutlinedButton(
+                        onClick = { viewModel.requestExport(ExportFormat.CSV) },
+                        enabled = !state.isUnavailable && !state.isExporting && state.exportRequest == null,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (state.isExporting) "保存中…" else "CSV") }
+                }
+            }
+        }
     }
 }
 
@@ -221,13 +261,38 @@ private fun RegisterScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selected = state.selectedRegister
     val summary = state.selectedSummary
+    var discardRegisterEditConfirmationVisible by rememberSaveable { mutableStateOf(false) }
+    var discardAdjustmentEditConfirmationVisible by rememberSaveable { mutableStateOf(false) }
+
+    val registerEditHasChanges = state.registerEditDialog?.let { dialog ->
+        selected != null && (
+            dialog.openingFloatText != selected.openingFloatYen.toString() ||
+                dialog.actualCashText != (selected.actualCashYen?.toString() ?: "") ||
+                dialog.nextFloatText != (selected.nextFloatYen?.toString() ?: "")
+            )
+    } == true
+    val adjustmentEditHasChanges = state.entryEditDialog?.let { dialog ->
+        state.selectedEntries.firstOrNull { it.id == dialog.entryId }?.let { entry ->
+            dialog.amountText != (entry.amountYen?.toString() ?: "")
+        }
+    } == true
+
+    fun requestDismissRegisterEdit() {
+        if (registerEditHasChanges) discardRegisterEditConfirmationVisible = true else viewModel.dismissRegisterEditDialog()
+    }
+
+    fun requestDismissAdjustmentEdit() {
+        if (adjustmentEditHasChanges) discardAdjustmentEditConfirmationVisible = true else viewModel.dismissEntryEditDialog()
+    }
 
     BackHandler {
         when {
+            discardAdjustmentEditConfirmationVisible -> discardAdjustmentEditConfirmationVisible = false
+            discardRegisterEditConfirmationVisible -> discardRegisterEditConfirmationVisible = false
             state.clearHistoryDialog != null -> viewModel.dismissClearHistoryDialog()
             state.voidEntryId != null -> viewModel.dismissVoidEntry()
-            state.entryEditDialog != null -> viewModel.dismissEntryEditDialog()
-            state.registerEditDialog != null -> viewModel.dismissRegisterEditDialog()
+            state.entryEditDialog != null -> requestDismissAdjustmentEdit()
+            state.registerEditDialog != null -> requestDismissRegisterEdit()
             state.isCloseConfirmationVisible -> viewModel.dismissCloseConfirmation()
             state.closeDialog != null -> viewModel.dismissCloseDialog()
             state.adjustmentDialog != null -> viewModel.dismissAdjustmentDialog()
@@ -241,6 +306,10 @@ private fun RegisterScreen(
         ErrorText(state.errorMessage)
         SuccessText(state.message)
 
+        if (state.isUnavailable) {
+            Text("保存済みデータを読み込めません。アプリを再起動してください。", color = MaterialTheme.colorScheme.error)
+        }
+
         if (state.openRegister == null) {
             Spacer(Modifier.height(12.dp))
             Card(Modifier.fillMaxWidth()) {
@@ -248,11 +317,10 @@ private fun RegisterScreen(
                     Text("開始時の釣銭を入力してレジを始める", style = MaterialTheme.typography.titleMedium)
                     state.latestClosed?.nextFloatYen?.let { candidate ->
                         Text("前回終了時に残した釣銭: ${formatYen(candidate)}")
-                        TextButton(onClick = { viewModel.onOpeningFloatChanged(candidate.toString()) }) { Text("候補を入力") }
                     } ?: Text("初回のため候補はありません。0円でも開始できます。")
                     MoneyField(STARTING_CHANGE_LABEL, state.openingFloatText, viewModel::onOpeningFloatChanged)
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = viewModel::startRegister, enabled = !state.isSaving, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = viewModel::startRegister, enabled = !state.isSaving && !state.isUnavailable, modifier = Modifier.fillMaxWidth()) {
                         Text(if (state.isSaving) "保存中…" else "この金額でレジを始める")
                     }
                 }
@@ -269,15 +337,15 @@ private fun RegisterScreen(
                     SummaryLine("補充した現金", formatYen(state.openSummary?.cashInYen))
                     SummaryLine("取り出した現金", formatYen(state.openSummary?.cashOutYen))
                     SummaryLine(EXPECTED_CASH_LABEL, formatYen(state.openSummary?.expectedCashYen))
-                    SummaryLine("記録件数", state.openEntries.size.toString())
+                    SummaryLine("記録件数", state.openEntryCount.toString())
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_IN) }, enabled = !state.isSaving) { Text("釣銭を補充") }
-                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_OUT) }, enabled = !state.isSaving) { Text("現金を取り出す") }
+                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_IN) }, enabled = !state.isSaving && !state.isUnavailable) { Text("釣銭を補充") }
+                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_OUT) }, enabled = !state.isSaving && !state.isUnavailable) { Text("現金を取り出す") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving) { Text("開始時の釣銭を編集") }
-                        Button(onClick = viewModel::showCloseDialog, enabled = !state.isSaving) { Text("レジを終える") }
+                        OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving && !state.isUnavailable) { Text("開始時の釣銭を編集") }
+                        Button(onClick = viewModel::showCloseDialog, enabled = !state.isSaving && !state.isUnavailable) { Text("レジを終える") }
                     }
                 }
             }
@@ -291,6 +359,10 @@ private fun RegisterScreen(
             }
             SummaryLine("状態", selected.status.displayLabel())
             SummaryLine(STARTING_CHANGE_LABEL, formatYen(selected.openingFloatYen))
+            SummaryLine("受け取った現金", formatYen(summary?.paymentCollectedYen))
+            SummaryLine("補充した現金", formatYen(summary?.cashInYen))
+            SummaryLine("取り出した現金", formatYen(summary?.cashOutYen))
+            SummaryLine("現金増減", formatSignedYen(summary?.netCashYen))
             SummaryLine(EXPECTED_CASH_LABEL, formatYen(summary?.expectedCashYen))
             if (selected.status == RegisterStatus.CLOSED) {
                 SummaryLine(COUNTED_CASH_LABEL, formatYen(selected.actualCashYen))
@@ -298,7 +370,7 @@ private fun RegisterScreen(
                 SummaryLine(NEXT_CHANGE_LABEL, formatYen(selected.nextFloatYen))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving) { Text("このレジを編集") }
+                OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving && !state.isUnavailable) { Text("このレジを編集") }
                 OutlinedButton(onClick = { onNavigateToCalculator(selected.id) }) { Text("このレジの取引を見る") }
             }
             if (state.selectedEntries.isNotEmpty()) {
@@ -311,7 +383,12 @@ private fun RegisterScreen(
                         onVoid = { viewModel.requestVoidEntry(entry) },
                     )
                 }
+                if (state.selectedEntries.size < state.selectedEntryCount) {
+                    TextButton(onClick = viewModel::loadMoreSelectedEntries) { Text("さらに表示") }
+                }
             }
+            SummaryLine("作成日時", formatDateTime(selected.createdAt))
+            SummaryLine("更新日時", formatDateTime(selected.updatedAt))
         }
 
         Spacer(Modifier.height(16.dp))
@@ -319,7 +396,7 @@ private fun RegisterScreen(
         state.registers.forEach { register ->
             RegisterHistoryCard(register, state.summaries[register.id], selected?.id == register.id) { viewModel.selectRegister(register.id) }
         }
-        OutlinedButton(onClick = viewModel::showClearHistoryDialog, enabled = !state.isSaving, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = viewModel::showClearHistoryDialog, enabled = !state.isSaving && !state.isUnavailable, modifier = Modifier.fillMaxWidth()) {
             Text("全レジ履歴をクリア")
         }
     }
@@ -330,6 +407,7 @@ private fun RegisterScreen(
             title = { Text(if (dialog.kind == CashEntryKind.CASH_IN) "釣銭を補充" else "現金を取り出す") },
             text = {
                 Column {
+                    ErrorText(state.errorMessage)
                     MoneyField("移動する金額", dialog.amountText, viewModel::onAdjustmentAmountChanged)
                     Spacer(Modifier.height(8.dp))
                     Text("実際に現金を移動してから保存してください。")
@@ -351,6 +429,7 @@ private fun RegisterScreen(
             text = {
                 Column {
                     Text("レジ内の現金を数え、取出し前の金額を入力してください。")
+                    ErrorText(state.errorMessage)
                     Spacer(Modifier.height(8.dp))
                     MoneyField("$COUNTED_CASH_LABEL（取出し前）", dialog.actualCashText, viewModel::onCloseActualChanged)
                     MoneyField(NEXT_CHANGE_LABEL, dialog.nextFloatText, viewModel::onCloseNextFloatChanged)
@@ -377,6 +456,10 @@ private fun RegisterScreen(
             title = { Text("この内容でレジを終了しますか？") },
             text = {
                 Column {
+                    ErrorText(state.errorMessage)
+                    SummaryLine("受け取った現金", formatYen(openSummary?.paymentCollectedYen))
+                    SummaryLine("補充した現金", formatYen(openSummary?.cashInYen))
+                    SummaryLine("取り出した現金", formatYen(openSummary?.cashOutYen))
                     Text("$DIFFERENCE_LABEL: ${formatSignedYen(difference)}")
                     if (difference != null && difference != 0L) Text(if (difference < 0) "${formatYen(abs(difference))}不足のまま終了します。" else "${formatYen(difference)}余ったまま終了します。")
                     if (actual != null && next != null) Text("今回取り出す現金: ${formatYen(actual - next)}")
@@ -398,10 +481,11 @@ private fun RegisterScreen(
         }
         val editedActual = if (isClosed) parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, true) else null
         AlertDialog(
-            onDismissRequest = viewModel::dismissRegisterEditDialog,
+            onDismissRequest = ::requestDismissRegisterEdit,
             title = { Text("レジの記録を編集") },
             text = {
                 Column {
+                    ErrorText(state.errorMessage)
                     MoneyField(STARTING_CHANGE_LABEL, dialog.openingFloatText, viewModel::onRegisterEditOpeningChanged)
                     if (isClosed) {
                         MoneyField(COUNTED_CASH_LABEL, dialog.actualCashText, viewModel::onRegisterEditActualChanged)
@@ -415,17 +499,22 @@ private fun RegisterScreen(
                 }
             },
             confirmButton = { Button(onClick = viewModel::saveRegisterEdit, enabled = !state.isSaving) { Text("保存") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissRegisterEditDialog) { Text("キャンセル") } },
+            dismissButton = { TextButton(onClick = ::requestDismissRegisterEdit) { Text("キャンセル") } },
         )
     }
 
     state.entryEditDialog?.let { dialog ->
         AlertDialog(
-            onDismissRequest = viewModel::dismissEntryEditDialog,
+            onDismissRequest = ::requestDismissAdjustmentEdit,
             title = { Text("補充・取出し明細を編集") },
-            text = { MoneyField("金額", dialog.amountText, viewModel::onEntryEditAmountChanged) },
+            text = {
+                Column {
+                    ErrorText(state.errorMessage)
+                    MoneyField("金額", dialog.amountText, viewModel::onEntryEditAmountChanged)
+                }
+            },
             confirmButton = { Button(onClick = viewModel::saveEntryEdit, enabled = !state.isSaving) { Text("保存") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissEntryEditDialog) { Text("キャンセル") } },
+            dismissButton = { TextButton(onClick = ::requestDismissAdjustmentEdit) { Text("キャンセル") } },
         )
     }
 
@@ -445,6 +534,7 @@ private fun RegisterScreen(
             title = { Text("全履歴を消去しますか？") },
             text = {
                 Column {
+                    ErrorText(state.errorMessage)
                     Text("レジ件数: ${dialog.registerCount}件")
                     Text("明細件数: ${dialog.entryCount}件")
                     Text("稼働中のレジ: ${if (dialog.hasOpenRegister) "あり" else "なし"}")
@@ -456,9 +546,39 @@ private fun RegisterScreen(
             dismissButton = {
                 Row {
                     TextButton(onClick = viewModel::dismissClearHistoryDialog) { Text("キャンセル") }
-                    TextButton(onClick = viewModel::dismissClearHistoryDialog) { Text("ホームで先に出力") }
+                    TextButton(onClick = { viewModel.dismissClearHistoryDialog(); onNavigateHome() }) { Text("ホームで先に出力") }
                 }
             },
+        )
+    }
+
+    if (discardRegisterEditConfirmationVisible) {
+        AlertDialog(
+            onDismissRequest = { discardRegisterEditConfirmationVisible = false },
+            title = { Text("編集を破棄しますか？") },
+            text = { Text("変更したレジ情報は保存されません。") },
+            confirmButton = {
+                Button(onClick = {
+                    discardRegisterEditConfirmationVisible = false
+                    viewModel.dismissRegisterEditDialog()
+                }) { Text("破棄する") }
+            },
+            dismissButton = { TextButton(onClick = { discardRegisterEditConfirmationVisible = false }) { Text("編集を続ける") } },
+        )
+    }
+
+    if (discardAdjustmentEditConfirmationVisible) {
+        AlertDialog(
+            onDismissRequest = { discardAdjustmentEditConfirmationVisible = false },
+            title = { Text("編集を破棄しますか？") },
+            text = { Text("変更した金額は保存されません。") },
+            confirmButton = {
+                Button(onClick = {
+                    discardAdjustmentEditConfirmationVisible = false
+                    viewModel.dismissEntryEditDialog()
+                }) { Text("破棄する") }
+            },
+            dismissButton = { TextButton(onClick = { discardAdjustmentEditConfirmationVisible = false }) { Text("編集を続ける") } },
         )
     }
 }
@@ -504,8 +624,6 @@ private fun CalculatorScreen(
         }
     }
 
-    LaunchedEffect(Unit) { viewModel.selectTab(CalculatorTab.CALCULATE) }
-
     LaunchedEffect(initialTargetId) {
         initialTargetId?.let {
             viewModel.setInitialTarget(it)
@@ -522,6 +640,9 @@ private fun CalculatorScreen(
         }
         ErrorText(state.errorMessage)
         SuccessText(state.message)
+        if (state.isUnavailable) {
+            Text("保存済みデータを読み込めません。アプリを再起動してください。", color = MaterialTheme.colorScheme.error)
+        }
         Spacer(Modifier.height(12.dp))
 
         Text("対象レジ", style = MaterialTheme.typography.labelLarge)
@@ -540,6 +661,9 @@ private fun CalculatorScreen(
         }
         if (selected?.status == RegisterStatus.CLOSED) {
             Text("終了済みのため、取引は記録できません", color = MaterialTheme.colorScheme.error)
+        }
+        if (state.pendingEntryId != null) {
+            Text("保存待ちの入力です。対象レジを変更する前に保存または入力をクリアしてください。", color = MaterialTheme.colorScheme.primary)
         }
         TabRow(selectedTabIndex = state.selectedTab.ordinal) {
             Tab(
@@ -562,6 +686,8 @@ private fun CalculatorScreen(
                     value = state.productText,
                     focused = state.focusedField == CalculatorInputField.PRODUCT,
                     onFocus = { viewModel.focusField(CalculatorInputField.PRODUCT) },
+                    onValueChange = viewModel::onProductChanged,
+                    enabled = selected?.status != RegisterStatus.CLOSED,
                 )
                 Spacer(Modifier.height(10.dp))
                 CalculatorMoneyField(
@@ -569,6 +695,8 @@ private fun CalculatorScreen(
                     value = state.receivedText,
                     focused = state.focusedField == CalculatorInputField.RECEIVED,
                     onFocus = { viewModel.focusField(CalculatorInputField.RECEIVED) },
+                    onValueChange = viewModel::onReceivedChanged,
+                    enabled = selected?.status != RegisterStatus.CLOSED,
                 )
                 Spacer(Modifier.height(14.dp))
 
@@ -581,7 +709,7 @@ private fun CalculatorScreen(
 
                 Spacer(Modifier.height(12.dp))
                 CalculatorKeypad(
-                    enabled = !state.isSaving,
+                    enabled = !state.isSaving && selected?.status != RegisterStatus.CLOSED,
                     onDigit = viewModel::appendDigit,
                     onDelete = viewModel::deleteLastDigit,
                     onClear = viewModel::clearFocusedInput,
@@ -594,7 +722,7 @@ private fun CalculatorScreen(
                         onClick = viewModel::savePayment,
                         modifier = Modifier.weight(1f),
                         enabled = (selected?.status == RegisterStatus.OPEN || state.pendingEntryId != null) &&
-                            result is ChangeResult.Success && !state.isSaving,
+                            result is ChangeResult.Success && !state.isSaving && !state.isUnavailable,
                     ) {
                         Text(
                             when {
@@ -610,7 +738,7 @@ private fun CalculatorScreen(
                         enabled = !state.isSaving,
                     ) { Text("入力をクリア") }
                 }
-                if (selected == null) {
+                if (selected == null || (selected.status == RegisterStatus.CLOSED && state.pendingEntryId == null)) {
                     TextButton(onClick = onNavigateToRegister) { Text("レジを開始する") }
                 }
             }
@@ -624,6 +752,9 @@ private fun CalculatorScreen(
                         onEdit = { viewModel.showPaymentEditDialog(entry) },
                         onVoid = { viewModel.requestVoidPayment(entry) },
                     )
+                }
+                if (state.entries.size < state.entryCount) {
+                    TextButton(onClick = viewModel::loadMoreEntries) { Text("さらに表示") }
                 }
             }
         }
@@ -640,6 +771,7 @@ private fun CalculatorScreen(
                         value = state.editProductText,
                         focused = state.editFocusedField == CalculatorInputField.PRODUCT,
                         onFocus = { viewModel.focusEditField(CalculatorInputField.PRODUCT) },
+                        onValueChange = viewModel::onEditProductChanged,
                     )
                     Spacer(Modifier.height(8.dp))
                     CalculatorMoneyField(
@@ -647,6 +779,7 @@ private fun CalculatorScreen(
                         value = state.editReceivedText,
                         focused = state.editFocusedField == CalculatorInputField.RECEIVED,
                         onFocus = { viewModel.focusEditField(CalculatorInputField.RECEIVED) },
+                        onValueChange = viewModel::onEditReceivedChanged,
                     )
                     Spacer(Modifier.height(8.dp))
                     when (editResult) {
@@ -717,6 +850,10 @@ private fun AboutScreen(
     onNavigateHome: () -> Unit,
     onContact: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var privacyVisible by rememberSaveable { mutableStateOf(false) }
+    var mitVisible by rememberSaveable { mutableStateOf(false) }
+    var dependencyLicensesVisible by rememberSaveable { mutableStateOf(false) }
     BackHandler { onNavigateHome() }
     AppContent(paddingValues) {
         Text("アプリ情報", style = MaterialTheme.typography.headlineSmall)
@@ -728,12 +865,45 @@ private fun AboutScreen(
         Text("Uber Eats公式アプリではない、個人用の非公式補助アプリです。")
         Text("記録は端末内にローカル保存し、オフラインで利用できます。ログイン、クラウド同期、業務データの外部送信はありません。")
         Text("自動バックアップや端末移行には対応しません。アンインストールや端末のアプリデータ消去で履歴は失われます。")
+        Text("本アプリは個人利用を前提とし、すべての機能を無料で利用できます。個人用版では開発支援購入などの課金機能は提供しません。")
+        Text("書き出しを実行した場合だけ、選択した保存先へJSONまたはCSVを保存します。")
         Spacer(Modifier.height(12.dp))
+        Text("プライバシーとライセンス", style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = { privacyVisible = !privacyVisible }) { Text(if (privacyVisible) "プライバシーポリシーを閉じる" else "プライバシーポリシーを表示") }
+        if (privacyVisible) {
+            Card(Modifier.fillMaxWidth()) {
+                SelectionContainer {
+                    Text(readRawResource(context, R.raw.privacy_policy), modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+        TextButton(onClick = { mitVisible = !mitVisible }) { Text(if (mitVisible) "MIT Licenseを閉じる" else "MIT Licenseを表示") }
+        if (mitVisible) {
+            Card(Modifier.fillMaxWidth()) {
+                SelectionContainer {
+                    Text(readRawResource(context, R.raw.mit_license), modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+        TextButton(onClick = { dependencyLicensesVisible = !dependencyLicensesVisible }) {
+            Text(if (dependencyLicensesVisible) "依存ライセンスを閉じる" else "依存ライセンスを表示")
+        }
+        if (dependencyLicensesVisible) {
+            Card(Modifier.fillMaxWidth()) {
+                SelectionContainer {
+                    Text(readRawResource(context, R.raw.third_party_licenses), modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Text("問い合わせ操作をしたときだけ、固定URLを外部ブラウザーで開きます。顧客情報・金額・端末情報はURLに付加しません。")
         Spacer(Modifier.height(8.dp))
         Button(onClick = onContact) { Text("GitHubで問い合わせ") }
     }
 }
+
+private fun readRawResource(context: android.content.Context, resourceId: Int): String =
+    context.resources.openRawResource(resourceId).bufferedReader(Charsets.UTF_8).use { it.readText() }
 
 @Composable
 private fun CalculatorMoneyField(
@@ -741,18 +911,19 @@ private fun CalculatorMoneyField(
     value: String,
     focused: Boolean,
     onFocus: () -> Unit,
+    onValueChange: (String) -> Unit,
     enabled: Boolean = true,
 ) {
     OutlinedTextField(
         value = value,
-        onValueChange = {},
+        onValueChange = onValueChange,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onFocus),
         label = { Text(label) },
         singleLine = true,
-        readOnly = true,
         enabled = enabled,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
         isError = false,
         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -935,11 +1106,19 @@ private fun AppContent(paddingValues: PaddingValues, content: @Composable Column
 
 @Composable
 private fun UbaregiTheme(content: @Composable () -> Unit) {
+    val darkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     MaterialTheme(
-        colorScheme = androidx.compose.material3.lightColorScheme(
-            primary = Color(0xFF1769AA),
-            secondary = Color(0xFF4D6475),
-        ),
+        colorScheme = if (darkTheme) {
+            androidx.compose.material3.darkColorScheme(
+                primary = Color(0xFF8CC8FF),
+                secondary = Color(0xFFB6C8D8),
+            )
+        } else {
+            androidx.compose.material3.lightColorScheme(
+                primary = Color(0xFF1769AA),
+                secondary = Color(0xFF4D6475),
+            )
+        },
         content = content,
     )
 }

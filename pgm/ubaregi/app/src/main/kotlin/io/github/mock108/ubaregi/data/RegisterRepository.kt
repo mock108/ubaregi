@@ -81,6 +81,21 @@ interface RegisterRepository {
 
     fun observeEntries(sessionId: String): Flow<List<CashEntry>>
 
+    /** Returns only the requested window for history screens. */
+    suspend fun listEntriesPage(sessionId: String, limit: Int, offset: Int): List<CashEntry> =
+        listEntries(sessionId).drop(offset).take(limit)
+
+    /** The default implementation keeps simple fakes source-compatible. */
+    fun observeEntriesPage(sessionId: String, limit: Int, offset: Int): Flow<List<CashEntry>> =
+        observeEntries(sessionId).map { entries -> entries.drop(offset).take(limit) }
+
+    fun observeEntryCount(sessionId: String): Flow<Int> =
+        observeEntries(sessionId).map { it.size }
+
+    suspend fun getEntryCount(sessionId: String): Int = listEntries(sessionId).size
+
+    suspend fun exportSnapshot(): ExportSnapshot = error("Export is not available")
+
     suspend fun summarizeRegister(sessionId: String): RegisterSummary
 
     suspend fun editPayment(
@@ -242,6 +257,32 @@ class RoomRegisterRepository(
     }
 
     override fun observeEntries(sessionId: String): Flow<List<CashEntry>> = entryDao.observeForSession(sessionId)
+
+    override suspend fun listEntriesPage(sessionId: String, limit: Int, offset: Int): List<CashEntry> {
+        validateUuid(sessionId, "レジID")
+        require(limit > 0) { "limit must be positive" }
+        require(offset >= 0) { "offset must not be negative" }
+        return entryDao.findForSessionPage(sessionId, limit, offset)
+    }
+
+    override fun observeEntriesPage(sessionId: String, limit: Int, offset: Int): Flow<List<CashEntry>> =
+        entryDao.observeForSessionPage(sessionId, limit, offset)
+
+    override fun observeEntryCount(sessionId: String): Flow<Int> = entryDao.observeCountForSession(sessionId)
+
+    override suspend fun getEntryCount(sessionId: String): Int {
+        validateUuid(sessionId, "レジID")
+        return entryDao.countForSession(sessionId)
+    }
+
+    override suspend fun exportSnapshot(): ExportSnapshot = database.withTransaction {
+        val exportedAt = clock()
+        validateTimestamp(exportedAt)
+        val meta = getOrCreateDatasetMeta()
+        val sessions = sessionDao.findAll().sortedBy { it.sequence }
+        val entries = sessions.flatMap { session -> entryDao.findForSession(session.id) }
+        ExportSnapshot(meta, sessions, entries, exportedAt)
+    }
 
     override suspend fun summarizeRegister(sessionId: String): RegisterSummary = database.withTransaction {
         validateUuid(sessionId, "レジID")

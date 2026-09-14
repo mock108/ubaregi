@@ -11,4 +11,13 @@ class UbaregiApplication : Application() {
     val registerRepository: RoomRegisterRepository by lazy {
         RoomRegisterRepository(database)
     }
+
+    val exportService: AndroidExportService by lazy {
+        AndroidExportService(this, registerRepository, BuildConfig.VERSION_NAME)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        AndroidExportService.cleanupTemporaryFiles(this)
+    }
 }

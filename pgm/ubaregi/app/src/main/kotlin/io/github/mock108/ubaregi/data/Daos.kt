@@ -130,8 +130,20 @@ interface CashEntryDao {
     @Query("SELECT * FROM cash_entry WHERE session_id = :sessionId ORDER BY sequence ASC")
     suspend fun findForSession(sessionId: String): List<CashEntry>
 
+    @Query("SELECT * FROM cash_entry WHERE session_id = :sessionId ORDER BY sequence DESC LIMIT :limit OFFSET :offset")
+    suspend fun findForSessionPage(sessionId: String, limit: Int, offset: Int): List<CashEntry>
+
     @Query("SELECT * FROM cash_entry WHERE session_id = :sessionId ORDER BY sequence DESC")
     fun observeForSession(sessionId: String): Flow<List<CashEntry>>
+
+    @Query("SELECT * FROM cash_entry WHERE session_id = :sessionId ORDER BY sequence DESC LIMIT :limit OFFSET :offset")
+    fun observeForSessionPage(sessionId: String, limit: Int, offset: Int): Flow<List<CashEntry>>
+
+    @Query("SELECT COUNT(*) FROM cash_entry WHERE session_id = :sessionId")
+    fun observeCountForSession(sessionId: String): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM cash_entry WHERE session_id = :sessionId")
+    suspend fun countForSession(sessionId: String): Int
 
     @Query("SELECT COALESCE(MAX(sequence), 0) + 1 FROM cash_entry WHERE session_id = :sessionId")
     suspend fun nextSequence(sessionId: String): Long
