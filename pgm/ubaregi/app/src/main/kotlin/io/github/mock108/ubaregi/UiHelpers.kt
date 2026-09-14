@@ -1,6 +1,25 @@
 package io.github.mock108.ubaregi
 
 import io.github.mock108.ubaregi.data.MAX_AMOUNT_YEN
+import io.github.mock108.ubaregi.data.CashEntryKind
+import io.github.mock108.ubaregi.data.RegisterStatus
+
+internal const val STARTING_CHANGE_LABEL = "開始時の釣銭"
+internal const val COUNTED_CASH_LABEL = "実際に数えた手元現金"
+internal const val NEXT_CHANGE_LABEL = "次回に残す釣銭"
+internal const val EXPECTED_CASH_LABEL = "計算上の手元現金"
+internal const val DIFFERENCE_LABEL = "計算との差額"
+
+internal fun RegisterStatus.displayLabel(): String = when (this) {
+    RegisterStatus.OPEN -> "稼働中"
+    RegisterStatus.CLOSED -> "終了済み"
+}
+
+internal fun CashEntryKind.displayLabel(): String = when (this) {
+    CashEntryKind.PAYMENT -> "受け渡し"
+    CashEntryKind.CASH_IN -> "釣銭補充"
+    CashEntryKind.CASH_OUT -> "現金取出し"
+}
 
 internal fun normalizeDigits(value: String): String = value.trim().map { character ->
     if (character in '０'..'９') {

@@ -188,17 +188,17 @@ private fun HomeScreen(
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 if (state.openRegister == null) {
-                    Text("レジ未開始", style = MaterialTheme.typography.titleLarge)
+                    Text("レジはまだ始まっていません", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(8.dp))
-                    Text("前回の締め結果を現在残高としては表示していません。")
+                    Text("レジを始めると、今回の現金の動きを記録できます。")
                 } else {
                     val register = state.openRegister
                     Text("レジ稼働中", style = MaterialTheme.typography.titleLarge)
                     Text("レジ #${register?.sequence} / ${formatDateTime(register?.openedAt)}")
                     Spacer(Modifier.height(8.dp))
-                    SummaryLine("現金回収額", formatYen(state.summary?.paymentCollectedYen))
-                    SummaryLine("予定残高", formatYen(state.summary?.expectedCashYen))
-                    SummaryLine("現在の状態", "OPEN")
+                    SummaryLine("受け取った現金", formatYen(state.summary?.paymentCollectedYen))
+                    SummaryLine(EXPECTED_CASH_LABEL, formatYen(state.summary?.expectedCashYen))
+                    SummaryLine("現在の状態", RegisterStatus.OPEN.displayLabel())
                 }
             }
         }
@@ -206,7 +206,7 @@ private fun HomeScreen(
         ErrorText(state.errorMessage)
         Spacer(Modifier.height(16.dp))
         HomeActionButton("おつりを計算", "商品金額と受取金額から計算") { onNavigate(AppDestination.CALCULATOR) }
-        HomeActionButton("レジを開始・締める", "初期釣銭、補充、取出し、締め結果") { onNavigate(AppDestination.REGISTER) }
+        HomeActionButton("レジを始める・終える", "開始時の釣銭、現金の補充・取出し、終了時の確認") { onNavigate(AppDestination.REGISTER) }
         HomeActionButton("アプリ情報", "データの扱いと問い合わせ先") { onNavigate(AppDestination.ABOUT) }
     }
 }
@@ -236,8 +236,8 @@ private fun RegisterScreen(
     }
 
     AppContent(paddingValues) {
-        Text("レジ締め / 初期釣銭", style = MaterialTheme.typography.headlineSmall)
-        Text("候補は表示するだけでは保存されません。開始ボタンで確定します。")
+        Text("レジの開始・終了", style = MaterialTheme.typography.headlineSmall)
+        Text("前回レジ終了時に残した釣銭を候補として表示します。開始ボタンを押すまで保存されません。")
         ErrorText(state.errorMessage)
         SuccessText(state.message)
 
@@ -245,15 +245,15 @@ private fun RegisterScreen(
             Spacer(Modifier.height(12.dp))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("初期釣銭を入力してレジを開始", style = MaterialTheme.typography.titleMedium)
+                    Text("開始時の釣銭を入力してレジを始める", style = MaterialTheme.typography.titleMedium)
                     state.latestClosed?.nextFloatYen?.let { candidate ->
-                        Text("最新の締め済みレジの候補: ${formatYen(candidate)}")
+                        Text("前回終了時に残した釣銭: ${formatYen(candidate)}")
                         TextButton(onClick = { viewModel.onOpeningFloatChanged(candidate.toString()) }) { Text("候補を入力") }
                     } ?: Text("初回のため候補はありません。0円でも開始できます。")
-                    MoneyField("初期釣銭", state.openingFloatText, viewModel::onOpeningFloatChanged)
+                    MoneyField(STARTING_CHANGE_LABEL, state.openingFloatText, viewModel::onOpeningFloatChanged)
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = viewModel::startRegister, enabled = !state.isSaving, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (state.isSaving) "保存中…" else "この金額でレジ開始")
+                        Text(if (state.isSaving) "保存中…" else "この金額でレジを始める")
                     }
                 }
             }
@@ -262,22 +262,22 @@ private fun RegisterScreen(
             Spacer(Modifier.height(12.dp))
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("稼働中レジ #${open?.sequence}", style = MaterialTheme.typography.titleLarge)
-                    Text("開始 ${formatDateTime(open?.openedAt)}")
-                    SummaryLine("初期釣銭", formatYen(open?.openingFloatYen))
-                    SummaryLine("現金回収額", formatYen(state.openSummary?.paymentCollectedYen))
-                    SummaryLine("入金合計", formatYen(state.openSummary?.cashInYen))
-                    SummaryLine("出金合計", formatYen(state.openSummary?.cashOutYen))
-                    SummaryLine("予定残高", formatYen(state.openSummary?.expectedCashYen))
-                    SummaryLine("明細件数", state.openEntries.size.toString())
+                    Text("稼働中のレジ #${open?.sequence}", style = MaterialTheme.typography.titleLarge)
+                    Text("開始日時 ${formatDateTime(open?.openedAt)}")
+                    SummaryLine(STARTING_CHANGE_LABEL, formatYen(open?.openingFloatYen))
+                    SummaryLine("受け取った現金", formatYen(state.openSummary?.paymentCollectedYen))
+                    SummaryLine("補充した現金", formatYen(state.openSummary?.cashInYen))
+                    SummaryLine("取り出した現金", formatYen(state.openSummary?.cashOutYen))
+                    SummaryLine(EXPECTED_CASH_LABEL, formatYen(state.openSummary?.expectedCashYen))
+                    SummaryLine("記録件数", state.openEntries.size.toString())
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_IN) }, enabled = !state.isSaving) { Text("釣銭補充") }
-                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_OUT) }, enabled = !state.isSaving) { Text("現金取出し") }
+                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_IN) }, enabled = !state.isSaving) { Text("釣銭を補充") }
+                        OutlinedButton(onClick = { viewModel.showAdjustmentDialog(CashEntryKind.CASH_OUT) }, enabled = !state.isSaving) { Text("現金を取り出す") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving) { Text("初期釣銭を編集") }
-                        Button(onClick = viewModel::showCloseDialog, enabled = !state.isSaving) { Text("レジ締め") }
+                        OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving) { Text("開始時の釣銭を編集") }
+                        Button(onClick = viewModel::showCloseDialog, enabled = !state.isSaving) { Text("レジを終える") }
                     }
                 }
             }
@@ -287,15 +287,15 @@ private fun RegisterScreen(
             Spacer(Modifier.height(16.dp))
             Text("選択中のレジ #${selected.sequence}", style = MaterialTheme.typography.titleMedium)
             if (selected.status == RegisterStatus.CLOSED && selected.revision > (selected.closeRevision ?: selected.revision)) {
-                Text("締め後に修正済み", color = MaterialTheme.colorScheme.primary)
+                Text("終了後に修正済み", color = MaterialTheme.colorScheme.primary)
             }
-            SummaryLine("状態", selected.status.name)
-            SummaryLine("初期釣銭", formatYen(selected.openingFloatYen))
-            SummaryLine("予定残高", formatYen(summary?.expectedCashYen))
+            SummaryLine("状態", selected.status.displayLabel())
+            SummaryLine(STARTING_CHANGE_LABEL, formatYen(selected.openingFloatYen))
+            SummaryLine(EXPECTED_CASH_LABEL, formatYen(summary?.expectedCashYen))
             if (selected.status == RegisterStatus.CLOSED) {
-                SummaryLine("実残高", formatYen(selected.actualCashYen))
-                SummaryLine("過不足", formatSignedYen(summary?.differenceYen))
-                SummaryLine("次回釣銭", formatYen(selected.nextFloatYen))
+                SummaryLine(COUNTED_CASH_LABEL, formatYen(selected.actualCashYen))
+                SummaryLine(DIFFERENCE_LABEL, formatSignedYen(summary?.differenceYen))
+                SummaryLine(NEXT_CHANGE_LABEL, formatYen(selected.nextFloatYen))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = viewModel::showRegisterEditDialog, enabled = !state.isSaving) { Text("このレジを編集") }
@@ -327,12 +327,12 @@ private fun RegisterScreen(
     state.adjustmentDialog?.let { dialog ->
         AlertDialog(
             onDismissRequest = viewModel::dismissAdjustmentDialog,
-            title = { Text(if (dialog.kind == CashEntryKind.CASH_IN) "釣銭補充" else "現金取出し") },
+            title = { Text(if (dialog.kind == CashEntryKind.CASH_IN) "釣銭を補充" else "現金を取り出す") },
             text = {
                 Column {
-                    MoneyField("金額", dialog.amountText, viewModel::onAdjustmentAmountChanged)
+                    MoneyField("移動する金額", dialog.amountText, viewModel::onAdjustmentAmountChanged)
                     Spacer(Modifier.height(8.dp))
-                    Text("実際に現金を移動した後に保存してください。")
+                    Text("実際に現金を移動してから保存してください。")
                 }
             },
             confirmButton = { Button(onClick = viewModel::saveAdjustment, enabled = !state.isSaving) { Text("保存") } },
@@ -341,75 +341,77 @@ private fun RegisterScreen(
     }
 
     state.closeDialog?.let { dialog ->
-        val actual = parseMoneyInput(dialog.actualCashText, "実残高", true)
-        val next = parseMoneyInput(dialog.nextFloatText, "次回釣銭", true)
+        val actual = parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, true)
+        val next = parseMoneyInput(dialog.nextFloatText, NEXT_CHANGE_LABEL, true)
         val openSummary = state.openSummary
         val openRegister = state.openRegister
         AlertDialog(
             onDismissRequest = viewModel::dismissCloseDialog,
-            title = { Text("レジ締め") },
+            title = { Text("レジを終える") },
             text = {
                 Column {
-                    MoneyField("実残高R", dialog.actualCashText, viewModel::onCloseActualChanged)
-                    MoneyField("次回釣銭N", dialog.nextFloatText, viewModel::onCloseNextFloatChanged)
+                    Text("レジ内の現金を数え、取出し前の金額を入力してください。")
                     Spacer(Modifier.height(8.dp))
-                    SummaryLine("予定残高E", formatYen(openSummary?.expectedCashYen))
-                    if (actual != null && openSummary != null) SummaryLine("過不足D", formatSignedYen(actual - openSummary.expectedCashYen))
-                    if (actual != null && openRegister != null) SummaryLine("手元現金の増減G", formatSignedYen(actual - openRegister.openingFloatYen))
-                    if (actual != null && next != null) SummaryLine("締め時の取出額W", formatYen(actual - next))
+                    MoneyField("$COUNTED_CASH_LABEL（取出し前）", dialog.actualCashText, viewModel::onCloseActualChanged)
+                    MoneyField(NEXT_CHANGE_LABEL, dialog.nextFloatText, viewModel::onCloseNextFloatChanged)
+                    Spacer(Modifier.height(8.dp))
+                    SummaryLine(EXPECTED_CASH_LABEL, formatYen(openSummary?.expectedCashYen))
+                    if (actual != null && openSummary != null) SummaryLine(DIFFERENCE_LABEL, formatSignedYen(actual - openSummary.expectedCashYen))
+                    if (actual != null && openRegister != null) SummaryLine("開始時からの現金増減", formatSignedYen(actual - openRegister.openingFloatYen))
+                    if (actual != null && next != null) SummaryLine("今回取り出す現金", formatYen(actual - next))
                 }
             },
-            confirmButton = { Button(onClick = viewModel::requestCloseConfirmation, enabled = !state.isSaving) { Text("締め内容を確認") } },
+            confirmButton = { Button(onClick = viewModel::requestCloseConfirmation, enabled = !state.isSaving) { Text("終了内容を確認") } },
             dismissButton = { TextButton(onClick = viewModel::dismissCloseDialog) { Text("キャンセル") } },
         )
     }
 
     if (state.isCloseConfirmationVisible) {
         val dialog = state.closeDialog
-        val actual = dialog?.let { parseMoneyInput(it.actualCashText, "実残高", true) }
-        val next = dialog?.let { parseMoneyInput(it.nextFloatText, "次回釣銭", true) }
+        val actual = dialog?.let { parseMoneyInput(it.actualCashText, COUNTED_CASH_LABEL, true) }
+        val next = dialog?.let { parseMoneyInput(it.nextFloatText, NEXT_CHANGE_LABEL, true) }
         val openSummary = state.openSummary
         val difference = if (actual != null && openSummary != null) actual - openSummary.expectedCashYen else null
         AlertDialog(
             onDismissRequest = viewModel::dismissCloseConfirmation,
-            title = { Text("この内容でレジを締めますか？") },
+            title = { Text("この内容でレジを終了しますか？") },
             text = {
                 Column {
-                    Text("過不足: ${formatSignedYen(difference)}")
-                    if (difference != null && difference != 0L) Text(if (difference < 0) "不足${formatYen(abs(difference))}のまま締めます。" else "超過${formatYen(difference)}のまま締めます。")
-                    if (actual != null && next != null) Text("取出額: ${formatYen(actual - next)}")
+                    Text("$DIFFERENCE_LABEL: ${formatSignedYen(difference)}")
+                    if (difference != null && difference != 0L) Text(if (difference < 0) "${formatYen(abs(difference))}不足のまま終了します。" else "${formatYen(difference)}余ったまま終了します。")
+                    if (actual != null && next != null) Text("今回取り出す現金: ${formatYen(actual - next)}")
                     Text("確認中に別の更新があった場合は保存せず、最新状態を読み直します。")
                 }
             },
-            confirmButton = { Button(onClick = viewModel::closeRegister, enabled = !state.isSaving) { Text("締める") } },
+            confirmButton = { Button(onClick = viewModel::closeRegister, enabled = !state.isSaving) { Text("レジを終了する") } },
             dismissButton = { TextButton(onClick = viewModel::dismissCloseConfirmation) { Text("戻る") } },
         )
     }
 
     state.registerEditDialog?.let { dialog ->
         val isClosed = selected?.status == RegisterStatus.CLOSED
-        val opening = parseMoneyInput(dialog.openingFloatText, "初期釣銭", true)
+        val opening = parseMoneyInput(dialog.openingFloatText, STARTING_CHANGE_LABEL, true)
         val editedExpected = if (opening != null && selected != null && summary != null) {
             summary.expectedCashYen + opening - selected.openingFloatYen
         } else {
             null
         }
-        val editedActual = if (isClosed) parseMoneyInput(dialog.actualCashText, "実残高", true) else null
+        val editedActual = if (isClosed) parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, true) else null
         AlertDialog(
             onDismissRequest = viewModel::dismissRegisterEditDialog,
-            title = { Text("レジ情報を編集") },
+            title = { Text("レジの記録を編集") },
             text = {
                 Column {
-                    MoneyField("初期釣銭", dialog.openingFloatText, viewModel::onRegisterEditOpeningChanged)
+                    MoneyField(STARTING_CHANGE_LABEL, dialog.openingFloatText, viewModel::onRegisterEditOpeningChanged)
                     if (isClosed) {
-                        MoneyField("実残高", dialog.actualCashText, viewModel::onRegisterEditActualChanged)
-                        MoneyField("次回釣銭", dialog.nextFloatText, viewModel::onRegisterEditNextChanged)
+                        MoneyField(COUNTED_CASH_LABEL, dialog.actualCashText, viewModel::onRegisterEditActualChanged)
+                        MoneyField(NEXT_CHANGE_LABEL, dialog.nextFloatText, viewModel::onRegisterEditNextChanged)
                     }
                     if (editedExpected != null) {
-                        SummaryLine("編集後予定残高", formatYen(editedExpected))
-                        if (editedActual != null) SummaryLine("編集後過不足", formatSignedYen(editedActual - editedExpected))
+                        SummaryLine("編集後の$EXPECTED_CASH_LABEL", formatYen(editedExpected))
+                        if (editedActual != null) SummaryLine("編集後の$DIFFERENCE_LABEL", formatSignedYen(editedActual - editedExpected))
                     }
-                    Text("編集前後の集計は保存後に再計算されます。別レジの初期釣銭は変更しません。")
+                    Text("編集前後の集計は保存後に再計算されます。別のレジの開始時の釣銭は変更しません。")
                 }
             },
             confirmButton = { Button(onClick = viewModel::saveRegisterEdit, enabled = !state.isSaving) { Text("保存") } },
@@ -445,7 +447,7 @@ private fun RegisterScreen(
                 Column {
                     Text("レジ件数: ${dialog.registerCount}件")
                     Text("明細件数: ${dialog.entryCount}件")
-                    Text("稼働中レジ: ${if (dialog.hasOpenRegister) "あり" else "なし"}")
+                    Text("稼働中のレジ: ${if (dialog.hasOpenRegister) "あり" else "なし"}")
                     Spacer(Modifier.height(8.dp))
                     Text("この操作は復元できません。稼働中レジも削除されます。")
                 }
@@ -525,19 +527,19 @@ private fun CalculatorScreen(
         Text("対象レジ", style = MaterialTheme.typography.labelLarge)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = { registerMenuExpanded = true }, enabled = state.registers.isNotEmpty()) {
-                Text(selected?.let { "#${it.sequence} ${it.status.name}" } ?: "レジ未開始")
+                Text(selected?.let { "#${it.sequence} ${it.status.displayLabel()}" } ?: "レジはまだありません")
             }
             DropdownMenu(expanded = registerMenuExpanded, onDismissRequest = { registerMenuExpanded = false }) {
                 state.registers.forEach { register ->
                     DropdownMenuItem(
-                        text = { Text("#${register.sequence} ${register.status.name}") },
+                        text = { Text("#${register.sequence} ${register.status.displayLabel()}") },
                         onClick = { viewModel.selectRegister(register.id); registerMenuExpanded = false },
                     )
                 }
             }
         }
         if (selected?.status == RegisterStatus.CLOSED) {
-            Text("締め済み: 記録不可", color = MaterialTheme.colorScheme.error)
+            Text("終了済みのため、取引は記録できません", color = MaterialTheme.colorScheme.error)
         }
         TabRow(selectedTabIndex = state.selectedTab.ordinal) {
             Tab(
@@ -615,7 +617,7 @@ private fun CalculatorScreen(
 
             CalculatorTab.RECORDS -> {
                 Text("受渡し履歴", style = MaterialTheme.typography.titleMedium)
-                if (state.paymentEntries.isEmpty()) Text("このレジのPAYMENT明細はありません。")
+                if (state.paymentEntries.isEmpty()) Text("このレジの受け渡し記録はありません。")
                 state.paymentEntries.forEach { entry ->
                     PaymentEntryCard(
                         entry = entry,
@@ -818,7 +820,7 @@ private fun RowScope.KeypadIconButton(
 private fun AdjustmentEntryCard(entry: CashEntry, onEdit: () -> Unit, onVoid: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
-            Text("#${entry.sequence} ${if (entry.kind == CashEntryKind.CASH_IN) "CASH_IN 補充" else "CASH_OUT 取出し"}")
+            Text("#${entry.sequence} ${entry.kind.displayLabel()}")
             SummaryLine("日時", formatDateTime(entry.occurredAt))
             SummaryLine("金額", formatYen(entry.amountYen))
             if (entry.isVoided) {
@@ -859,11 +861,11 @@ private fun PaymentEntryCard(entry: CashEntry, onEdit: () -> Unit, onVoid: () ->
 private fun RegisterHistoryCard(register: RegisterSession, summary: io.github.mock108.ubaregi.domain.RegisterSummary?, selected: Boolean, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
         Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
-            Text("#${register.sequence} ${register.status.name}${if (selected) "（選択中）" else ""}")
-            Text("開始 ${formatDateTime(register.openedAt)} / 初期釣銭 ${formatYen(register.openingFloatYen)}")
-            Text("現金回収 ${formatYen(summary?.paymentCollectedYen)} / 予定残高 ${formatYen(summary?.expectedCashYen)}")
-            Text("過不足 ${formatSignedYen(summary?.differenceYen)}${if (register.status == RegisterStatus.CLOSED && register.revision > (register.closeRevision ?: register.revision)) " / 締め後に修正済み" else ""}")
-            Text("実残高 ${formatYen(register.actualCashYen)} / 次回 ${formatYen(register.nextFloatYen)}")
+            Text("#${register.sequence} ${register.status.displayLabel()}${if (selected) "（選択中）" else ""}")
+            Text("開始日時 ${formatDateTime(register.openedAt)} / $STARTING_CHANGE_LABEL ${formatYen(register.openingFloatYen)}")
+            Text("受け取った現金 ${formatYen(summary?.paymentCollectedYen)} / $EXPECTED_CASH_LABEL ${formatYen(summary?.expectedCashYen)}")
+            Text("$DIFFERENCE_LABEL ${formatSignedYen(summary?.differenceYen)}${if (register.status == RegisterStatus.CLOSED && register.revision > (register.closeRevision ?: register.revision)) " / 終了後に修正済み" else ""}")
+            Text("$COUNTED_CASH_LABEL ${formatYen(register.actualCashYen)} / $NEXT_CHANGE_LABEL ${formatYen(register.nextFloatYen)}")
         }
     }
 }

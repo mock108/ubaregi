@@ -211,9 +211,9 @@ class RegisterViewModel(
 
     fun startRegister() {
         if (_uiState.value.isSaving) return
-        val amount = parseMoneyInput(_uiState.value.openingFloatText, "初期釣銭", allowZero = true)
+        val amount = parseMoneyInput(_uiState.value.openingFloatText, STARTING_CHANGE_LABEL, allowZero = true)
         if (amount == null) {
-            showError("初期釣銭は0〜9,999,999円で入力してください")
+            showError("$STARTING_CHANGE_LABELは0〜9,999,999円で入力してください")
             return
         }
         saveOperation {
@@ -232,7 +232,7 @@ class RegisterViewModel(
 
     fun showAdjustmentDialog(kind: CashEntryKind) {
         if (_uiState.value.openRegister == null) {
-            showError("OPENレジを開始してください")
+            showError("稼働中のレジを始めてください")
             return
         }
         _uiState.update { it.copy(adjustmentDialog = AdjustmentDialogState(kind), message = null, errorMessage = null) }
@@ -252,7 +252,7 @@ class RegisterViewModel(
             return
         }
         val session = _uiState.value.openRegister ?: run {
-            showError("OPENレジを開始してください")
+            showError("稼働中のレジを始めてください")
             return
         }
         saveOperation {
@@ -264,7 +264,7 @@ class RegisterViewModel(
             _uiState.update {
                 it.copy(
                     adjustmentDialog = null,
-                    message = "記録しました。実際に現金を移動した後に保存してください。",
+                    message = "現金の移動を記録しました。",
                     errorMessage = null,
                 )
             }
@@ -273,7 +273,7 @@ class RegisterViewModel(
 
     fun showCloseDialog() {
         val session = _uiState.value.openRegister ?: run {
-            showError("OPENレジはありません")
+            showError("稼働中のレジはありません")
             return
         }
         _uiState.update {
@@ -298,12 +298,12 @@ class RegisterViewModel(
 
     fun requestCloseConfirmation() {
         val dialog = _uiState.value.closeDialog ?: return
-        val actual = parseMoneyInput(dialog.actualCashText, "実残高", allowZero = true)
-        val next = parseMoneyInput(dialog.nextFloatText, "次回釣銭", allowZero = true)
+        val actual = parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, allowZero = true)
+        val next = parseMoneyInput(dialog.nextFloatText, NEXT_CHANGE_LABEL, allowZero = true)
         when {
-            actual == null -> showError("実残高は0〜9,999,999円で入力してください")
-            next == null -> showError("次回釣銭は0〜9,999,999円で入力してください")
-            next > actual -> showError("次回釣銭は実残高を超えられません")
+            actual == null -> showError("$COUNTED_CASH_LABELは0〜9,999,999円で入力してください")
+            next == null -> showError("$NEXT_CHANGE_LABELは0〜9,999,999円で入力してください")
+            next > actual -> showError("$NEXT_CHANGE_LABELは$COUNTED_CASH_LABELを超えられません")
             else -> _uiState.update { it.copy(isCloseConfirmationVisible = true, errorMessage = null) }
         }
     }
@@ -314,8 +314,8 @@ class RegisterViewModel(
         if (_uiState.value.isSaving) return
         val session = _uiState.value.openRegister ?: return
         val dialog = _uiState.value.closeDialog ?: return
-        val actual = parseMoneyInput(dialog.actualCashText, "実残高", allowZero = true)
-        val next = parseMoneyInput(dialog.nextFloatText, "次回釣銭", allowZero = true)
+        val actual = parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, allowZero = true)
+        val next = parseMoneyInput(dialog.nextFloatText, NEXT_CHANGE_LABEL, allowZero = true)
         if (actual == null || next == null || next > actual) {
             _uiState.update { it.copy(isCloseConfirmationVisible = false) }
             requestCloseConfirmation()
@@ -327,7 +327,7 @@ class RegisterViewModel(
                 it.copy(
                     closeDialog = null,
                     isCloseConfirmationVisible = false,
-                    message = "レジを締めました。次のレジは自動開始していません。",
+                    message = "レジを終了しました。次のレジは自動で始まりません。",
                     errorMessage = null,
                 )
             }
@@ -360,19 +360,19 @@ class RegisterViewModel(
     fun saveRegisterEdit() {
         val session = _uiState.value.selectedRegister ?: return
         val dialog = _uiState.value.registerEditDialog ?: return
-        val opening = parseMoneyInput(dialog.openingFloatText, "初期釣銭", allowZero = true)
+        val opening = parseMoneyInput(dialog.openingFloatText, STARTING_CHANGE_LABEL, allowZero = true)
         if (opening == null) {
-            showError("初期釣銭は0〜9,999,999円で入力してください")
+            showError("$STARTING_CHANGE_LABELは0〜9,999,999円で入力してください")
             return
         }
-        val actual = if (session.status == RegisterStatus.CLOSED) parseMoneyInput(dialog.actualCashText, "実残高", true) else null
-        val next = if (session.status == RegisterStatus.CLOSED) parseMoneyInput(dialog.nextFloatText, "次回釣銭", true) else null
+        val actual = if (session.status == RegisterStatus.CLOSED) parseMoneyInput(dialog.actualCashText, COUNTED_CASH_LABEL, true) else null
+        val next = if (session.status == RegisterStatus.CLOSED) parseMoneyInput(dialog.nextFloatText, NEXT_CHANGE_LABEL, true) else null
         if (session.status == RegisterStatus.CLOSED && (actual == null || next == null)) {
-            showError("実残高と次回釣銭を入力してください")
+            showError("$COUNTED_CASH_LABELと$NEXT_CHANGE_LABELを入力してください")
             return
         }
         if (actual != null && next != null && next > actual) {
-            showError("次回釣銭は実残高を超えられません")
+            showError("$NEXT_CHANGE_LABELは$COUNTED_CASH_LABELを超えられません")
             return
         }
         saveOperation {
@@ -684,7 +684,7 @@ class CalculatorViewModel(
         val state = _uiState.value
         val session = state.selectedRegister
         if (session == null || (session.status != RegisterStatus.OPEN && state.pendingEntryId == null)) {
-            showError("OPENレジを開始すると受渡しを記録できます")
+            showError("レジを始めると受け渡しを記録できます")
             return
         }
         val result = ChangeCalculator.calculate(state.productText, state.receivedText)

@@ -11,15 +11,15 @@ sealed class RegisterDataException(message: String) : IllegalStateException(mess
 
 class InvalidRegisterData(message: String) : RegisterDataException(message)
 
-class OpenRegisterAlreadyExists : RegisterDataException("OPENレジは最大1件です")
+class OpenRegisterAlreadyExists : RegisterDataException("稼働中のレジは最大1件です")
 
 class RegisterNotFound : RegisterDataException("対象レジが見つかりません")
 
 class EntryNotFound : RegisterDataException("対象明細が見つかりません")
 
-class RegisterIsNotOpen : RegisterDataException("レジがOPENではありません")
+class RegisterIsNotOpen : RegisterDataException("レジが稼働中ではありません")
 
-class RegisterIsAlreadyClosed : RegisterDataException("締め済みレジは再度締められません")
+class RegisterIsAlreadyClosed : RegisterDataException("終了済みのレジは再度終了できません")
 
 class EntryIsAlreadyVoided : RegisterDataException("取消済み明細は編集できません")
 
@@ -159,7 +159,7 @@ class RoomRegisterRepository(
         sessionId: String,
         openedAt: Long?,
     ): RegisterSession {
-        validateAmount(openingFloatYen, allowZero = true, fieldName = "初期釣銭")
+        validateAmount(openingFloatYen, allowZero = true, fieldName = "開始時の釣銭")
         validateUuid(sessionId, "レジID")
         val now = openedAt ?: clock()
         validateTimestamp(now)
@@ -263,7 +263,7 @@ class RoomRegisterRepository(
         val session = sessionDao.findById(entry.sessionId) ?: throw RegisterNotFound()
         checkRevisions(entry, session, expectedEntryRevision, expectedSessionRevision)
         checkEditable(entry)
-        if (entry.kind != CashEntryKind.PAYMENT) throw InvalidRegisterData("PAYMENT明細ではありません")
+        if (entry.kind != CashEntryKind.PAYMENT) throw InvalidRegisterData("受け渡し記録ではありません")
 
         val now = updatedAt ?: clock()
         validateTimestamp(now)
@@ -356,9 +356,9 @@ class RoomRegisterRepository(
         closedAt: Long?,
     ): RegisterSession = database.withTransaction {
         validateUuid(sessionId, "レジID")
-        validateAmount(actualCashYen, allowZero = true, fieldName = "実残高")
-        validateAmount(nextFloatYen, allowZero = true, fieldName = "次回釣銭")
-        if (nextFloatYen > actualCashYen) throw InvalidRegisterData("次回釣銭は実残高を超えられません")
+        validateAmount(actualCashYen, allowZero = true, fieldName = "実際に数えた手元現金")
+        validateAmount(nextFloatYen, allowZero = true, fieldName = "次回に残す釣銭")
+        if (nextFloatYen > actualCashYen) throw InvalidRegisterData("次回に残す釣銭は実際に数えた手元現金を超えられません")
 
         val session = sessionDao.findById(sessionId) ?: throw RegisterNotFound()
         if (session.status != RegisterStatus.OPEN) throw RegisterIsAlreadyClosed()
@@ -402,18 +402,18 @@ class RoomRegisterRepository(
         updatedAt: Long?,
     ): RegisterSession = database.withTransaction {
         validateUuid(sessionId, "レジID")
-        validateAmount(openingFloatYen, allowZero = true, fieldName = "初期釣銭")
+        validateAmount(openingFloatYen, allowZero = true, fieldName = "開始時の釣銭")
         val session = sessionDao.findById(sessionId) ?: throw RegisterNotFound()
         if (session.revision != expectedRevision) throw ConcurrentDataModification()
         if (session.status == RegisterStatus.OPEN && (actualCashYen != null || nextFloatYen != null)) {
-            throw InvalidRegisterData("OPENレジの締め値は未設定である必要があります")
+            throw InvalidRegisterData("稼働中のレジには終了時の金額を設定できません")
         }
         if (session.status == RegisterStatus.CLOSED) {
-            val actual = actualCashYen ?: throw InvalidRegisterData("実残高を指定してください")
-            val next = nextFloatYen ?: throw InvalidRegisterData("次回釣銭を指定してください")
-            validateAmount(actual, allowZero = true, fieldName = "実残高")
-            validateAmount(next, allowZero = true, fieldName = "次回釣銭")
-            if (next > actual) throw InvalidRegisterData("次回釣銭は実残高を超えられません")
+            val actual = actualCashYen ?: throw InvalidRegisterData("実際に数えた手元現金を指定してください")
+            val next = nextFloatYen ?: throw InvalidRegisterData("次回に残す釣銭を指定してください")
+            validateAmount(actual, allowZero = true, fieldName = "実際に数えた手元現金")
+            validateAmount(next, allowZero = true, fieldName = "次回に残す釣銭")
+            if (next > actual) throw InvalidRegisterData("次回に残す釣銭は実際に数えた手元現金を超えられません")
         }
 
         val now = updatedAt ?: clock()

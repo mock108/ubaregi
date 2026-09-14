@@ -64,7 +64,7 @@ class ViewModelsTest {
         viewModel.onOpeningFloatChanged("500")
         viewModel.startRegister()
         advanceUntilIdle()
-        assertEquals("OPENレジは最大1件です", viewModel.uiState.value.errorMessage)
+        assertEquals("稼働中のレジは最大1件です", viewModel.uiState.value.errorMessage)
     }
 
     @Test
@@ -160,7 +160,7 @@ class ViewModelsTest {
         viewModel.onCloseActualChanged("1000")
         viewModel.onCloseNextFloatChanged("1500")
         viewModel.requestCloseConfirmation()
-        assertEquals("次回釣銭は実残高を超えられません", viewModel.uiState.value.errorMessage)
+        assertEquals("次回に残す釣銭は実際に数えた手元現金を超えられません", viewModel.uiState.value.errorMessage)
 
         viewModel.onCloseNextFloatChanged("500")
         viewModel.requestCloseConfirmation()
@@ -265,7 +265,7 @@ private class FakeRegisterRepository : RegisterRepository {
 
     override suspend fun closeRegister(sessionId: String, expectedSessionRevision: Long, actualCashYen: Long, nextFloatYen: Long, closedAt: Long?): RegisterSession {
         val current = sessionsFlow.value.first { it.id == sessionId }
-        if (nextFloatYen > actualCashYen) throw InvalidRegisterData("次回釣銭は実残高を超えられません")
+        if (nextFloatYen > actualCashYen) throw InvalidRegisterData("次回に残す釣銭は実際に数えた手元現金を超えられません")
         val closed = current.copy(
             status = RegisterStatus.CLOSED,
             openSlot = null,
